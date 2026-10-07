@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 import { VideoStorageService } from '../storage/videoStorage.js';
 import { GeminiService } from '../services/geminiService.js';
 import { YouTubeService } from '../services/youtubeService.js';
@@ -218,6 +220,30 @@ router.post('/jobs/:id/retry/:platform', async (req: Request, res: Response) => 
     res.json({ success: true, data: updatedJob });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- Direct App Package Download Endpoint ---
+router.get('/download/app', (req: Request, res: Response) => {
+  const rootDir = process.cwd();
+  const tarPath = path.join(rootDir, 'dist', 'omnipost-video-standalone.tar.gz');
+  const fallbackTarPath = path.join(rootDir, 'omnipost-video-standalone.tar.gz');
+
+  if (fs.existsSync(tarPath)) {
+    return res.download(tarPath, 'omnipost-video-v1.0.0-standalone.tar.gz');
+  } else if (fs.existsSync(fallbackTarPath)) {
+    return res.download(fallbackTarPath, 'omnipost-video-v1.0.0-standalone.tar.gz');
+  } else {
+    // Dynamically package if not yet created
+    try {
+      execSync('npm run package', { cwd: rootDir, stdio: 'ignore' });
+      if (fs.existsSync(fallbackTarPath)) {
+        return res.download(fallbackTarPath, 'omnipost-video-v1.0.0-standalone.tar.gz');
+      }
+    } catch (e) {
+      console.error('[DownloadApp] Error packaging app:', e);
+    }
+    return res.status(500).json({ success: false, error: 'App package could not be generated' });
   }
 });
 

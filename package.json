@@ -9,6 +9,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
     "start": "NODE_ENV=production node dist/server/index.js",
+    "package": "npm run build && mkdir -p release-bundle/omnipost-video && cp -r dist public package.json .env.example README.md Dockerfile docker-compose.yml release-bundle/omnipost-video && cp -f package-lock.json release-bundle/omnipost-video/ 2>/dev/null || true && cd release-bundle && tar -czf ../omnipost-video-standalone.tar.gz omnipost-video && cd .. && rm -rf release-bundle",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

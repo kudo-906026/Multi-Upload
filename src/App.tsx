@@ -6,6 +6,7 @@ import { MetadataReview } from './components/MetadataReview';
 import { PresetsManager } from './components/PresetsManager';
 import { JobQueueView } from './components/JobQueueView';
 import { PlatformSettingsModal } from './components/PlatformSettingsModal';
+import { DownloadAppModal } from './components/DownloadAppModal';
 import {
   Platform,
   VideoMetadata,
@@ -28,7 +29,36 @@ export const App: React.FC = () => {
   const [authStatus, setAuthStatus] = useState<PlatformAuthStatus | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
 
+  // Download & PWA Modal state
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Capture beforeinstallprompt for PWA native install
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        console.log('User accepted the PWA install prompt');
+      }
+      setDeferredPrompt(null);
+    }
+  };
 
   // Load initial data
   const loadInitialData = async () => {
@@ -123,6 +153,8 @@ export const App: React.FC = () => {
         authStatus={authStatus}
         activeJobsCount={activeJobsCount}
         onRefreshAuth={loadInitialData}
+        onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+        isPwaInstallable={Boolean(deferredPrompt)}
       />
 
       {/* Main Content Area */}
@@ -187,6 +219,14 @@ export const App: React.FC = () => {
           />
         )}
       </main>
+
+      {/* Download / Install App Modal */}
+      <DownloadAppModal
+        isOpen={isDownloadModalOpen}
+        onClose={() => setIsDownloadModalOpen(false)}
+        deferredPrompt={deferredPrompt}
+        onInstallPwa={handleInstallPwa}
+      />
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-black/40 py-6 text-center text-xs text-slate-500">

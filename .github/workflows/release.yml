@@ -1,0 +1,116 @@
+name: Release & Distribute App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release-package:
+    name: Build & Publish Release Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Determine Version Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG_NAME=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Application
+        run: npm run build
+
+      - name: Create Standalone Distribution Bundle
+        run: |
+          TAG="${{ steps.vars.outputs.TAG_NAME }}"
+          mkdir -p release-bundle/omnipost-video
+
+          # Copy compiled output and runtime assets
+          cp -r dist release-bundle/omnipost-video/
+          cp -r public release-bundle/omnipost-video/
+          cp package.json release-bundle/omnipost-video/
+          cp package-lock.json release-bundle/omnipost-video/
+          cp .env.example release-bundle/omnipost-video/
+          cp README.md release-bundle/omnipost-video/
+          cp Dockerfile release-bundle/omnipost-video/
+          cp docker-compose.yml release-bundle/omnipost-video/
+
+          # Create distribution archives
+          cd release-bundle
+          zip -r "../omnipost-video-${TAG}-standalone.zip" omnipost-video
+          tar -czf "../omnipost-video-${TAG}-standalone.tar.gz" omnipost-video
+          cd ..
+
+      - name: Create GitHub Release with Downloadable App Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG_NAME }}
+          name: "OmniPost Video ${{ steps.vars.outputs.TAG_NAME }}"
+          draft: false
+          prerelease: false
+          body: |
+            ## OmniPost Video ${{ steps.vars.outputs.TAG_NAME }} ⚡
+            
+            ### 📥 Downloadable App Packages
+            - **Standalone ZIP Archive**: `omnipost-video-${{ steps.vars.outputs.TAG_NAME }}-standalone.zip`
+            - **Standalone TAR.GZ Archive**: `omnipost-video-${{ steps.vars.outputs.TAG_NAME }}-standalone.tar.gz`
+            
+            ### 🚀 Quick Start / Run Locally
+            1. Download and unzip the standalone package.
+            2. Run `npm install --omit=dev`
+            3. Configure `.env` with your `GEMINI_API_KEY`
+            4. Start with: `npm start`
+            
+            ### 📱 PWA / Mobile Installation
+            Open in Chrome / Safari on your mobile device or desktop and tap **"Install App"** from the top bar to install OmniPost as a native app on your Home Screen or Dock!
+          files: |
+            omnipost-video-*-standalone.zip
+            omnipost-video-*-standalone.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.vars.outputs.TAG_NAME }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

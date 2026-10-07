@@ -6,6 +6,56 @@ Upload a single video master once, analyze live trends with Google Search ground
 
 ---
 
+## 📱 Download & Install Options
+
+### 1. One-Click Native App Installation (PWA)
+OmniPost is packaged as a **Progressive Web App (PWA)** with standalone windowing, offline asset caching, and native OS integration:
+- **Android / Chrome Desktop**: Tap the **"Download App"** button in the header, or click the **Install App** icon in the browser address bar.
+- **iOS / Safari**: Tap **Share (⎋)** -> scroll down -> tap **"Add to Home Screen (⊞)"** -> tap **Add**.
+- Launches directly from your phone app drawer or desktop dock without browser toolbars.
+
+### 2. Download from GitHub Releases
+Our automated GitHub Actions workflow builds and publishes production archives on every release:
+- Go to **GitHub -> Releases**
+- Download `omnipost-video-v1.0.0-standalone.zip` or `.tar.gz`
+- Unzip and run:
+  ```bash
+  npm install --omit=dev
+  npm start
+  ```
+
+### 3. Run with Docker (Single Command)
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e GEMINI_API_KEY="your_api_key" \
+  --name omnipost-video \
+  ghcr.io/malakardilip170/omnipost-video:latest
+```
+
+---
+
+## 🛠️ GitHub Actions Workflows
+
+We provide three complete, automated GitHub workflows under `.github/workflows/`:
+
+1. **`ci.yml` (CI - Build & Test)**:
+   - Triggers on every push and pull request to `main`.
+   - Runs TypeScript linting, verification, and full-stack builds (`npm run build`).
+   - Verifies that both `dist/client/index.html` and the server bundle compile cleanly before any merge.
+
+2. **`release.yml` (Release & Distribute App)**:
+   - Triggers when you push a version tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`) or click **Run workflow** in the GitHub Actions tab.
+   - Automatically builds the full application.
+   - Packages standalone distribution ZIP and TAR.GZ archives.
+   - Publishes a formal GitHub Release with download links and release notes.
+   - Builds and publishes the multi-architecture Docker image to **GitHub Container Registry (ghcr.io)**.
+
+3. **`deploy-cloud-run.yml` (Continuous Deployment)**:
+   - Automated workflow to deploy the container directly to Google Cloud Run.
+
+---
+
 ## Architecture & Features
 
 1. **One-Upload Multi-Platform Distribution**:
@@ -72,31 +122,9 @@ INSTAGRAM_ACCESS_TOKEN=your_long_lived_user_access_token
 INSTAGRAM_USER_ID=your_instagram_business_account_id
 ```
 
-### How to Obtain Credentials:
-
-1. **Gemini API Key**:
-   - Go to [Google AI Studio](https://aistudio.google.com/)
-   - Click "Get API key" and paste it as `GEMINI_API_KEY`.
-
-2. **YouTube Data API v3**:
-   - Open [Google Cloud Console](https://console.cloud.google.com/)
-   - Enable **YouTube Data API v3**.
-   - Create an **OAuth 2.0 Client ID** (Web application).
-   - Add authorized redirect URI: `https://your-domain.run.app/api/auth/youtube/callback` (or `http://localhost:8080/api/auth/youtube/callback` in local dev).
-   - Scopes required: `https://www.googleapis.com/auth/youtube.upload` and `https://www.googleapis.com/auth/youtube.readonly`.
-
-3. **Instagram Graph API**:
-   - Convert your Instagram account to a **Business** or **Creator** account.
-   - Connect it to a Facebook Page in Meta Business Suite.
-   - In [Meta for Developers](https://developers.facebook.com/), create an app and add the **Instagram Graph API**.
-   - Generate a Long-Lived User Access Token with permissions: `instagram_basic`, `instagram_content_publish`.
-   - Find your Instagram User ID via Graph API Explorer: `GET /me/accounts?fields=instagram_business_account`.
-
-*Note: In development or test mode when credentials are not yet entered, OmniPost automatically activates high-fidelity simulated test modes so the full uploading, container polling, and queueing workflows can be tested immediately.*
-
 ---
 
-## Installation & Local Development
+## Local Development & Packaging
 
 ```bash
 # 1. Install dependencies
@@ -105,24 +133,12 @@ npm install
 # 2. Run dev server (Express + Vite HMR)
 npm run dev
 
-# 3. Build for production (Cloud Run)
+# 3. Build for production
 npm run build
 
-# 4. Start production server
+# 4. Create standalone downloadable zip package
+npm run package
+
+# 5. Start production server
 npm start
-```
-
----
-
-## Deployment to Google Cloud Run
-
-Deploy with Docker or Buildpacks directly to Cloud Run:
-
-```bash
-gcloud run deploy omnipost-video \
-  --source . \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars "NODE_ENV=production,GEMINI_API_KEY=xxx"
 ```

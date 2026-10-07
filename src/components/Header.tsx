@@ -1,5 +1,16 @@
 import React from 'react';
-import { Video, Sliders, History, Settings, Youtube, Instagram, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import {
+  Video,
+  Sliders,
+  History,
+  Settings,
+  Youtube,
+  Instagram,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  DownloadCloud,
+} from 'lucide-react';
 import { PlatformAuthStatus } from '@shared/types';
 
 interface HeaderProps {
@@ -8,6 +19,8 @@ interface HeaderProps {
   authStatus: PlatformAuthStatus | null;
   activeJobsCount: number;
   onRefreshAuth: () => void;
+  onOpenDownloadModal: () => void;
+  isPwaInstallable: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,6 +29,8 @@ export const Header: React.FC<HeaderProps> = ({
   authStatus,
   activeJobsCount,
   onRefreshAuth,
+  onOpenDownloadModal,
+  isPwaInstallable,
 }) => {
   return (
     <header className="sticky top-0 z-50 glass-panel border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md">
@@ -40,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Platform Status Badges */}
-          <div className="hidden md:flex items-center space-x-2">
+          <div className="hidden lg:flex items-center space-x-2">
             {/* YouTube Auth Badge */}
             <div
               onClick={() => setActiveTab('settings')}
@@ -90,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* Navigation Tabs */}
+          {/* Navigation Tabs + Download App Button */}
           <nav className="flex items-center space-x-1 sm:space-x-2">
             <button
               onClick={() => setActiveTab('create')}
@@ -141,6 +156,17 @@ export const Header: React.FC<HeaderProps> = ({
               title="API & Accounts Settings"
             >
               <Settings className="w-4 h-4" />
+            </button>
+
+            {/* Prominent Download / Install App Action */}
+            <button
+              onClick={onOpenDownloadModal}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-amber-500 via-orange-500 to-pink-500 text-white hover:opacity-95 transition-all shadow-md shadow-orange-500/20 active:scale-95 ml-1"
+              title="Install PWA or Download Release Package"
+            >
+              <DownloadCloud className="w-4 h-4" />
+              <span className="hidden md:inline">Download App</span>
+              <span className="md:hidden">App</span>
             </button>
           </nav>
         </div>

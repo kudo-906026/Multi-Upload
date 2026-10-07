@@ -1,0 +1,31 @@
+{
+  "short_name": "OmniPost",
+  "name": "OmniPost Video - AI Multi-Platform Publisher",
+  "description": "Upload one video and post to YouTube Shorts and Instagram Reels with Gemini AI trend analysis",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#090D16",
+  "theme_color": "#6366F1",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "categories": ["utilities", "productivity", "social", "video"]
+}
