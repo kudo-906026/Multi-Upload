@@ -52,7 +52,16 @@ Return strictly valid JSON with this exact schema (no markdown fences, just pure
     "caption": "Full Instagram Reels caption with line breaks and call to action.",
     "hashtags": ["#reels", "#reelsinstagram", "#explorepage", "#viral"],
     "recommendedAudio": "Upbeat synthwave / trending phonk or lofi beat"
-  }
+  },
+  "predictedGrowth": [
+    { "day": 1, "label": "Day 1", "youtubeViews": 1800, "instagramViews": 3200, "searchInterest": 48 },
+    { "day": 2, "label": "Day 2", "youtubeViews": 5600, "instagramViews": 8900, "searchInterest": 72 },
+    { "day": 3, "label": "Day 3", "youtubeViews": 16400, "instagramViews": 21500, "searchInterest": 95 },
+    { "day": 5, "label": "Day 5", "youtubeViews": 28100, "instagramViews": 32800, "searchInterest": 84 },
+    { "day": 7, "label": "Day 7", "youtubeViews": 39400, "instagramViews": 41200, "searchInterest": 73 },
+    { "day": 14, "label": "Day 14", "youtubeViews": 54800, "instagramViews": 52600, "searchInterest": 62 },
+    { "day": 30, "label": "Day 30", "youtubeViews": 76500, "instagramViews": 64800, "searchInterest": 55 }
+  ]
 }`;
 
     const userPrompt = `Analyze this video:
@@ -201,6 +210,15 @@ Search the web for what is currently trending around this topic in 2025/2026, fi
         ],
         recommendedAudio: 'Trending Lofi Synth Groove (118 BPM)'
       },
+      predictedGrowth: [
+        { day: 1, label: 'Day 1', youtubeViews: 2400, instagramViews: 4100, searchInterest: 52 },
+        { day: 2, label: 'Day 2', youtubeViews: 7800, instagramViews: 11500, searchInterest: 78 },
+        { day: 3, label: 'Day 3', youtubeViews: 21500, instagramViews: 26800, searchInterest: 96 },
+        { day: 5, label: 'Day 5', youtubeViews: 38200, instagramViews: 39400, searchInterest: 85 },
+        { day: 7, label: 'Day 7', youtubeViews: 51600, instagramViews: 48900, searchInterest: 74 },
+        { day: 14, label: 'Day 14', youtubeViews: 72400, instagramViews: 61200, searchInterest: 64 },
+        { day: 30, label: 'Day 30', youtubeViews: 98500, instagramViews: 74600, searchInterest: 58 }
+      ],
       analyzedAt: new Date().toISOString()
     };
   }

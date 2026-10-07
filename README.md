@@ -8,7 +8,18 @@ Upload a single video master once, analyze live trends with Google Search ground
 
 ## 📱 Download & Install Options
 
-### 1. One-Click Native App Installation (PWA)
+### 1. Native Android App (Capacitor APK)
+OmniPost Video is configured as a native Android app powered by **Capacitor**:
+- **Automated GitHub Builds**: The workflow `.github/workflows/build-android-apk.yml` automatically compiles `omnipost-video-latest.apk` on every push!
+- **Download from GitHub Actions Artifacts**: Go to your GitHub repository -> **Actions** tab -> click latest run -> download **`omnipost-video-android-apk`**.
+- **Download from GitHub Releases**: Direct APK release attached to version tags (e.g. `v1.0.0`).
+- **Local Native Android Build**:
+  ```bash
+  npm run cap:sync    # Build client & sync web assets to android/
+  npm run cap:build   # Build debug APK using Gradle
+  ```
+
+### 2. One-Click Native App Installation (PWA)
 OmniPost is packaged as a **Progressive Web App (PWA)** with standalone windowing, offline asset caching, and native OS integration:
 - **Android / Chrome Desktop**: Tap the **"Download App"** button in the header, or click the **Install App** icon in the browser address bar.
 - **iOS / Safari**: Tap **Share (⎋)** -> scroll down -> tap **"Add to Home Screen (⊞)"** -> tap **Add**.

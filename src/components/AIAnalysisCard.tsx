@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Sparkles, Globe, TrendingUp, Compass, CheckCircle2, ChevronDown, RefreshCw } from 'lucide-react';
+import { Sparkles, Globe, TrendingUp, Compass, CheckCircle2, ChevronDown, RefreshCw, FileDown } from 'lucide-react';
 import { AIAnalysisResult, VideoMetadata, AITone } from '@shared/types';
 import { ApiClient } from '../api';
+import { TrendGrowthChart } from './TrendGrowthChart';
+import { exportTrendAnalysisPDF } from '../utils/pdfExport';
 
 interface AIAnalysisCardProps {
   video: VideoMetadata | null;
@@ -67,9 +69,21 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
         </div>
 
         {analysisResult && (
-          <div className="flex items-center space-x-1.5 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2.5 py-1 rounded-lg">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Analysis Generated</span>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => exportTrendAnalysisPDF(analysisResult)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-95 text-white shadow-md shadow-indigo-600/30 active:scale-95 transition-all"
+              title="Download executive PDF report for clients and external review"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              <span>Export PDF Report</span>
+            </button>
+
+            <div className="flex items-center space-x-1.5 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2.5 py-1.5 rounded-xl">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Analyzed</span>
+            </div>
           </div>
         )}
       </div>
@@ -191,6 +205,16 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* D3.js Predicted Trend Growth Line Chart */}
+          {analysisResult.predictedGrowth && analysisResult.predictedGrowth.length > 0 && (
+            <div className="pt-2">
+              <TrendGrowthChart
+                data={analysisResult.predictedGrowth}
+                topic={analysisResult.topic}
+              />
             </div>
           )}
         </div>

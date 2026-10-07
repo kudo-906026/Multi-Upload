@@ -1,0 +1,12 @@
+{
+	"appId": "com.omnipost.video",
+	"appName": "OmniPost Video",
+	"webDir": "dist/client",
+	"server": {
+		"androidScheme": "https",
+		"cleartext": true
+	},
+	"android": {
+		"allowMixedContent": true
+	}
+}

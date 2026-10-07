@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   X,
   Download,
@@ -12,6 +12,7 @@ import {
   Sparkles,
   ShieldCheck,
   Layers,
+  PackageCheck,
 } from 'lucide-react';
 
 interface DownloadAppModalProps {
@@ -28,7 +29,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
   onInstallPwa,
 }) => {
   const [copiedCommand, setCopiedCommand] = useState(false);
-  const [activeTab, setActiveTab] = useState<'pwa' | 'github' | 'docker'>('pwa');
+  const [activeTab, setActiveTab] = useState<'apk' | 'pwa' | 'github' | 'docker'>('apk');
 
   if (!isOpen) return null;
 
@@ -53,11 +54,11 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
               <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                 Download & Install OmniPost App
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
-                  Official Release
+                  Capacitor Android Native
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Install directly on mobile / desktop, or download release bundles from GitHub.
+                Native Android APK, standalone packages, and PWA options.
               </p>
             </div>
           </div>
@@ -71,46 +72,103 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
         </div>
 
         {/* Tab Selection */}
-        <div className="flex border-b border-slate-800 bg-slate-950/40 p-2 gap-2">
+        <div className="flex border-b border-slate-800 bg-slate-950/40 p-2 gap-2 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('apk')}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 whitespace-nowrap ${
+              activeTab === 'apk'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <PackageCheck className="w-4 h-4 text-emerald-300" />
+            <span>Android APK (Native)</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('pwa')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 whitespace-nowrap ${
               activeTab === 'pwa'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
             <Smartphone className="w-4 h-4" />
-            <span>Mobile / Desktop App (PWA)</span>
+            <span>PWA Install</span>
           </button>
 
           <button
             onClick={() => setActiveTab('github')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 whitespace-nowrap ${
               activeTab === 'github'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
             <Github className="w-4 h-4" />
-            <span>GitHub Releases (.ZIP)</span>
+            <span>Release Archive</span>
           </button>
 
           <button
             onClick={() => setActiveTab('docker')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 whitespace-nowrap ${
               activeTab === 'docker'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
             <Terminal className="w-4 h-4" />
-            <span>Self-Host / Docker</span>
+            <span>Self-Host</span>
           </button>
         </div>
 
         {/* Tab Content */}
         <div className="p-6 space-y-6">
+          {/* TAB 0: Native Android APK */}
+          {activeTab === 'apk' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-emerald-950/30 border border-emerald-800/40 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <PackageCheck className="w-5 h-5 text-emerald-400" />
+                    <span className="font-bold text-sm text-white">Native Android APK Build</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-semibold">
+                    Capacitor Native Engine
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  The application is configured as a native Android project using <strong>Capacitor</strong>. Our automated GitHub Actions workflow (<code className="text-emerald-400 font-mono">.github/workflows/build-android-apk.yml</code>) builds the debug APK automatically on every push!
+                </p>
+
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-xs space-y-2">
+                  <div className="font-semibold text-white flex items-center justify-between">
+                    <span>Download Options:</span>
+                    <span className="text-[11px] text-slate-400 font-mono">com.omnipost.video</span>
+                  </div>
+                  <ul className="text-slate-400 space-y-1 text-[11px] list-disc list-inside">
+                    <li><strong>GitHub Actions Artifacts:</strong> Download <code className="text-slate-200">omnipost-video-latest.apk</code> from the latest run under the <strong>Actions</strong> tab.</li>
+                    <li><strong>GitHub Releases:</strong> Download the pre-built APK directly from the <strong>Releases</strong> section.</li>
+                    <li><strong>Local Build:</strong> Run <code className="text-emerald-400">npm run cap:build</code> to build with your local Android SDK.</li>
+                  </ul>
+                </div>
+
+                <div className="pt-1">
+                  <a
+                    href="https://github.com/malakardilip170"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-95 text-white text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 active:scale-95"
+                  >
+                    <Github className="w-4 h-4" />
+                    <span>View GitHub Repo & Download APK Artifact</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: PWA Native App */}
           {activeTab === 'pwa' && (
             <div className="space-y-4">
@@ -121,7 +179,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                     One-Tap Install (Standalone Mobile & Desktop App)
                   </h4>
                   <p className="text-xs text-slate-300">
-                    Runs offline with standalone windowing, home screen icon, and zero browser address bar distractions.
+                    Runs with standalone windowing, home screen icon, and zero browser address bar distractions.
                   </p>
                 </div>
 
@@ -183,24 +241,16 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 </div>
 
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Every version tag (e.g. <code className="text-amber-400">v1.0.0</code>) triggers our automated GitHub Release workflow which builds, tests, and attaches standalone production packages.
+                  Every version tag (e.g. <code className="text-amber-400">v1.0.0</code>) triggers our automated GitHub Release workflow which builds, tests, and attaches standalone production packages and APKs.
                 </p>
 
                 <div className="space-y-2 pt-2">
                   <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs">
                     <div className="flex items-center space-x-2">
                       <Layers className="w-4 h-4 text-indigo-400" />
-                      <span className="font-mono text-white">omnipost-video-v1.0.0-standalone.zip</span>
-                    </div>
-                    <span className="text-slate-400 text-[11px]">Production Build</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-                    <div className="flex items-center space-x-2">
-                      <Layers className="w-4 h-4 text-purple-400" />
                       <span className="font-mono text-white">omnipost-video-v1.0.0-standalone.tar.gz</span>
                     </div>
-                    <span className="text-slate-400 text-[11px]">Linux / Server Bundle</span>
+                    <span className="text-slate-400 text-[11px]">Production Bundle</span>
                   </div>
                 </div>
 

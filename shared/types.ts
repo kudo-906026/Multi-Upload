@@ -39,6 +39,14 @@ export interface InstagramGeneratedContent {
   hookSentence: string;
 }
 
+export interface GrowthDataPoint {
+  day: number;
+  label: string; // e.g. "Day 1", "Day 3", "Day 7", "Day 14", "Day 30"
+  youtubeViews: number;
+  instagramViews: number;
+  searchInterest: number; // 0 - 100
+}
+
 export interface AIAnalysisResult {
   topic: string;
   detectedTone: string;
@@ -46,6 +54,7 @@ export interface AIAnalysisResult {
   groundedTrends: GroundedTrend[];
   youtube: YouTubeGeneratedContent;
   instagram: InstagramGeneratedContent;
+  predictedGrowth?: GrowthDataPoint[];
   analyzedAt: string;
 }
 
