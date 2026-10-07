@@ -1,0 +1,7 @@
+{
+  "name": "OmniPost Video",
+  "description": "Cross-platform video publisher for YouTube and Instagram Reels with Gemini AI trend analysis",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
