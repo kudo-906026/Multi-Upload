@@ -9,6 +9,7 @@ interface VideoUploaderProps {
   onTogglePlatform: (platform: Platform) => void;
   currentVideo: VideoMetadata | null;
   onClearVideo: () => void;
+  onLoadSampleVideo?: () => void;
 }
 
 export const VideoUploader: React.FC<VideoUploaderProps> = ({
@@ -17,6 +18,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
   onTogglePlatform,
   currentVideo,
   onClearVideo,
+  onLoadSampleVideo,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -167,6 +169,22 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
                 Supports MP4, MOV, or WebM up to 250MB. Vertical 9:16 recommended for Shorts & Reels.
               </p>
             </div>
+
+            {!isUploading && onLoadSampleVideo && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLoadSampleVideo();
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600/30 to-purple-600/30 hover:from-indigo-600/50 hover:to-purple-600/50 text-indigo-200 hover:text-white text-xs font-bold border border-indigo-500/40 transition-all flex items-center space-x-2 shadow-sm active:scale-95"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>🎬 Load Sample Video & Live Demo Analysis</span>
+                </button>
+              </div>
+            )}
 
             {isUploading && (
               <div className="w-full max-w-xs bg-slate-800 h-2 rounded-full overflow-hidden mt-3">

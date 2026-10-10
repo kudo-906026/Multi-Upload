@@ -27,18 +27,22 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: Setup Java JDK 21 (Temurin)
+      - name: Setup Java JDK 17 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
           cache: 'gradle'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK & Accept Licenses
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          # Accept licenses without invoking obsolete 'tools' package
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Install NPM Dependencies
-        run: npm ci
+        run: npm ci || npm install
 
       - name: Build Web Application
         run: npm run build:client
@@ -52,7 +56,7 @@ jobs:
       - name: Build Android Debug APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
           cd ..
 
       - name: Prepare APK Artifacts
