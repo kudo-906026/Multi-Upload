@@ -18,5 +18,7 @@ local.properties
 debug.keystore
 node_modules/
 uploads/
+data/.secret_key
+data/accounts.json
 *.log
 

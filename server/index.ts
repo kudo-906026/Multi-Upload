@@ -5,11 +5,19 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import apiRoutes from './routes/api.js';
+import { AccountStorageService } from './services/accountStorage.js';
+import { InstagramService } from './services/instagramService.js';
+import { JobQueueService } from './services/jobQueue.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
+  // Initialize persistent services
+  AccountStorageService.init();
+  InstagramService.initAutoRefresh();
+  JobQueueService.init();
+
   const app = express();
 
   // Basic Middleware

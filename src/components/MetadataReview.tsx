@@ -24,6 +24,8 @@ import {
   InstagramPublishPayload,
   PrivacyStatus,
   PlatformPreset,
+  PlatformAuthStatus,
+  ConnectedAccount,
 } from '@shared/types';
 import { ApiClient } from '../api';
 
@@ -33,9 +35,16 @@ interface MetadataReviewProps {
   onPublish: (payloads: {
     youtubePayload?: YouTubePublishPayload;
     instagramPayload?: InstagramPublishPayload;
+    selectedAccounts?: {
+      youtubeAccountId?: string;
+      instagramAccountId?: string;
+    };
   }) => void;
   isPublishing: boolean;
   presets: PlatformPreset[];
+  authStatus?: PlatformAuthStatus | null;
+  onOpenAccounts?: () => void;
+  trendContext?: { topic: string; hashtags: string[] } | null;
 }
 
 export const MetadataReview: React.FC<MetadataReviewProps> = ({
@@ -44,10 +53,37 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
   onPublish,
   isPublishing,
   presets,
+  authStatus,
+  onOpenAccounts,
+  trendContext,
 }) => {
   const [activePlatformTab, setActivePlatformTab] = useState<Platform>(
     selectedPlatforms[0] || 'youtube'
   );
+
+  // Selected account state
+  const youtubeAccounts = authStatus?.youtube.accounts || [];
+  const instagramAccounts = authStatus?.instagram.accounts || [];
+
+  const [selectedYtAccountId, setSelectedYtAccountId] = useState<string>('');
+  const [selectedIgAccountId, setSelectedIgAccountId] = useState<string>('');
+
+  useEffect(() => {
+    if (youtubeAccounts.length > 0 && !selectedYtAccountId) {
+      const def = youtubeAccounts.find((a) => a.isDefault) || youtubeAccounts[0];
+      setSelectedYtAccountId(def.id);
+    }
+  }, [youtubeAccounts, selectedYtAccountId]);
+
+  useEffect(() => {
+    if (instagramAccounts.length > 0 && !selectedIgAccountId) {
+      const def = instagramAccounts.find((a) => a.isDefault) || instagramAccounts[0];
+      setSelectedIgAccountId(def.id);
+    }
+  }, [instagramAccounts, selectedIgAccountId]);
+
+  const currentYtAccount = youtubeAccounts.find((a) => a.id === selectedYtAccountId) || youtubeAccounts[0];
+  const currentIgAccount = instagramAccounts.find((a) => a.id === selectedIgAccountId) || instagramAccounts[0];
 
   // YouTube state
   const [ytTitle, setYtTitle] = useState('');
@@ -83,12 +119,76 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
     }
   }, [aiResult]);
 
-  // Ensure active tab is within selected platforms
+  // Auto-merge trendContext hashtags and keywords when available
   useEffect(() => {
-    if (selectedPlatforms.length > 0 && !selectedPlatforms.includes(activePlatformTab)) {
-      setActivePlatformTab(selectedPlatforms[0]);
+    if (trendContext && trendContext.hashtags.length > 0) {
+      setIgHashtags((prev) => {
+        const set = new Set(prev);
+        trendContext.hashtags.forEach((h) => {
+          const formatted = h.startsWith('#') ? h : `#${h}`;
+          set.add(formatted);
+        });
+        return Array.from(set);
+      });
+
+      setYtTags((prev) => {
+        const set = new Set(prev.map((t) => t.toLowerCase()));
+        const updated = [...prev];
+        trendContext.hashtags.forEach((h) => {
+          const clean = h.replace(/^#/, '');
+          if (!set.has(clean.toLowerCase())) {
+            set.add(clean.toLowerCase());
+            updated.push(clean);
+          }
+        });
+        return updated;
+      });
     }
-  }, [selectedPlatforms, activePlatformTab]);
+  }, [trendContext]);
+
+  // Derived candidate grounded keywords & hashtags from AI and Search Grounding
+  const allGroundedKeywords = Array.from(
+    new Set([
+      ...(aiResult?.groundedTrends?.flatMap((t) => t.trendingKeywords) || []),
+      ...(aiResult?.youtube?.tags || []),
+      ...(trendContext?.hashtags?.map((h) => h.replace(/^#/, '')) || []),
+    ])
+  ).map((k) => k.replace(/^#/, ''));
+
+  const allSuggestedHashtags = Array.from(
+    new Set([
+      ...(aiResult?.instagram?.hashtags || []),
+      ...(aiResult?.youtube?.hashtags || []),
+      ...(trendContext?.hashtags?.map((h) => (h.startsWith('#') ? h : `#${h}`)) || []),
+      ...(aiResult?.groundedTrends?.flatMap((t) =>
+        t.trendingKeywords.map((k) => (k.startsWith('#') ? k : `#${k.replace(/\s+/g, '')}`))
+      ) || []),
+    ])
+  );
+
+  const handleAutoAddAllGroundedKeywords = () => {
+    const currentSet = new Set(ytTags.map((t) => t.toLowerCase()));
+    const updated = [...ytTags];
+    allGroundedKeywords.forEach((k) => {
+      if (!currentSet.has(k.toLowerCase())) {
+        currentSet.add(k.toLowerCase());
+        updated.push(k);
+      }
+    });
+    setYtTags(updated);
+  };
+
+  const handleAutoAddAllSuggestedHashtags = () => {
+    const currentSet = new Set(igHashtags.map((h) => h.toLowerCase()));
+    const updated = [...igHashtags];
+    allSuggestedHashtags.forEach((h) => {
+      if (!currentSet.has(h.toLowerCase())) {
+        currentSet.add(h.toLowerCase());
+        updated.push(h);
+      }
+    });
+    setIgHashtags(updated);
+  };
 
   const handleApplyPreset = (platform: Platform) => {
     const preset = presets.find((p) => p.platform === platform);
@@ -186,7 +286,13 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
       };
     }
 
-    onPublish(payloads);
+    onPublish({
+      ...payloads,
+      selectedAccounts: {
+        youtubeAccountId: selectedPlatforms.includes('youtube') ? selectedYtAccountId || undefined : undefined,
+        instagramAccountId: selectedPlatforms.includes('instagram') ? selectedIgAccountId || undefined : undefined,
+      },
+    });
   };
 
   if (selectedPlatforms.length === 0) {
@@ -194,15 +300,15 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
   }
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 sm:p-6 shadow-xl space-y-5 sm:space-y-6 w-full max-w-full">
       {/* Step Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
         <div>
           <div className="flex items-center space-x-2">
-            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">
+            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
               3
             </span>
-            <h2 className="text-lg font-bold text-white tracking-tight">
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
               Review & Customize Before Publishing
             </h2>
           </div>
@@ -212,7 +318,7 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
         </div>
 
         {/* Platform Tabs switcher */}
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
           {selectedPlatforms.includes('youtube') && (
             <button
               type="button"
@@ -223,8 +329,8 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
-              <Youtube className="w-4 h-4" />
-              <span>YouTube Fields</span>
+              <Youtube className="w-4 h-4 text-white" />
+              <span>YouTube<span className="hidden sm:inline"> Fields</span></span>
             </button>
           )}
 
@@ -238,8 +344,8 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
-              <Instagram className="w-4 h-4" />
-              <span>Instagram Reels Fields</span>
+              <Instagram className="w-4 h-4 text-white" />
+              <span>Instagram<span className="hidden sm:inline"> Reels Fields</span></span>
             </button>
           )}
         </div>
@@ -283,6 +389,72 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
           {/* YouTube Form Fields */}
           {activePlatformTab === 'youtube' && (
             <div className="space-y-4">
+              {/* Target Channel Picker */}
+              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                    <Youtube className="w-4 h-4 text-red-500" />
+                    <span>Post to YouTube Channel:</span>
+                  </label>
+                  {onOpenAccounts && (
+                    <button
+                      type="button"
+                      onClick={onOpenAccounts}
+                      className="text-[11px] text-red-400 hover:text-red-300 font-semibold transition-colors"
+                    >
+                      + Manage Channels
+                    </button>
+                  )}
+                </div>
+
+                {youtubeAccounts.length === 0 ? (
+                  <div className="p-3 bg-red-950/30 border border-red-900/50 rounded-lg text-xs text-red-300 flex items-center justify-between">
+                    <span>No YouTube channel connected.</span>
+                    {onOpenAccounts && (
+                      <button
+                        type="button"
+                        onClick={onOpenAccounts}
+                        className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-[11px]"
+                      >
+                        Connect Channel
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <select
+                      value={selectedYtAccountId}
+                      onChange={(e) => setSelectedYtAccountId(e.target.value)}
+                      className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500 font-medium"
+                    >
+                      {youtubeAccounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.handle || acc.platformAccountId}){acc.isDefault ? ' [Default]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {currentYtAccount && (
+                      <div className="flex items-center space-x-2 px-2.5 py-1 bg-slate-900/80 rounded-lg border border-slate-800">
+                        {currentYtAccount.avatarUrl ? (
+                          <img
+                            src={currentYtAccount.avatarUrl}
+                            alt={currentYtAccount.name}
+                            className="w-5 h-5 rounded-full object-cover ring-1 ring-red-500/50"
+                          />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-red-600 text-[10px] font-bold text-white flex items-center justify-center">
+                            {currentYtAccount.name.charAt(0)}
+                          </div>
+                        )}
+                        <span className="text-xs text-slate-300 font-medium truncate max-w-[140px]">
+                          {currentYtAccount.name}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Title */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -323,9 +495,42 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
 
               {/* Search Tags */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  YouTube SEO Tags (Comma or Enter to add)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-300">
+                    YouTube SEO Tags ({ytTags.length} keywords)
+                  </label>
+                  {allGroundedKeywords.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAutoAddAllGroundedKeywords}
+                      className="flex items-center space-x-1 text-[11px] text-amber-400 hover:text-amber-300 font-semibold transition-colors"
+                      title="Automatically populate search tags with all grounded keywords discovered by Gemini"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Auto-Add All Grounded Keywords</span>
+                    </button>
+                  )}
+                </div>
+
+                {allGroundedKeywords.filter((k) => !ytTags.map((t) => t.toLowerCase()).includes(k.toLowerCase())).length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 mb-2">
+                    <span className="text-[10px] text-slate-500">Trending picks:</span>
+                    {allGroundedKeywords
+                      .filter((k) => !ytTags.map((t) => t.toLowerCase()).includes(k.toLowerCase()))
+                      .slice(0, 6)
+                      .map((k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setYtTags((prev) => [...prev, k])}
+                          className="px-2 py-0.5 rounded text-[10px] bg-indigo-950/50 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-500/30 flex items-center space-x-1 transition-colors"
+                        >
+                          <span>+ {k}</span>
+                        </button>
+                      ))}
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-1.5 bg-slate-950 p-2.5 rounded-xl border border-slate-800 mb-2 min-h-12 items-center">
                   {ytTags.map((tag) => (
                     <span
@@ -399,6 +604,72 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
           {/* Instagram Form Fields */}
           {activePlatformTab === 'instagram' && (
             <div className="space-y-4">
+              {/* Target Instagram Account Picker */}
+              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                    <Instagram className="w-4 h-4 text-pink-500" />
+                    <span>Post to Instagram Account:</span>
+                  </label>
+                  {onOpenAccounts && (
+                    <button
+                      type="button"
+                      onClick={onOpenAccounts}
+                      className="text-[11px] text-pink-400 hover:text-pink-300 font-semibold transition-colors"
+                    >
+                      + Manage Accounts
+                    </button>
+                  )}
+                </div>
+
+                {instagramAccounts.length === 0 ? (
+                  <div className="p-3 bg-pink-950/30 border border-pink-900/50 rounded-lg text-xs text-pink-300 flex items-center justify-between">
+                    <span>No Instagram account connected.</span>
+                    {onOpenAccounts && (
+                      <button
+                        type="button"
+                        onClick={onOpenAccounts}
+                        className="px-2.5 py-1 rounded bg-pink-600 hover:bg-pink-500 text-white font-bold text-[11px]"
+                      >
+                        Connect Account
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <select
+                      value={selectedIgAccountId}
+                      onChange={(e) => setSelectedIgAccountId(e.target.value)}
+                      className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500 font-medium"
+                    >
+                      {instagramAccounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.handle || acc.platformAccountId}){acc.isDefault ? ' [Default]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {currentIgAccount && (
+                      <div className="flex items-center space-x-2 px-2.5 py-1 bg-slate-900/80 rounded-lg border border-slate-800">
+                        {currentIgAccount.avatarUrl ? (
+                          <img
+                            src={currentIgAccount.avatarUrl}
+                            alt={currentIgAccount.name}
+                            className="w-5 h-5 rounded-full object-cover ring-1 ring-pink-500/50"
+                          />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-pink-600 text-[10px] font-bold text-white flex items-center justify-center">
+                            {currentIgAccount.name.charAt(0)}
+                          </div>
+                        )}
+                        <span className="text-xs text-slate-300 font-medium truncate max-w-[140px]">
+                          {currentIgAccount.handle || currentIgAccount.name}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Caption */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
@@ -415,9 +686,42 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
 
               {/* Hashtags */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Reels Hashtags ({igHashtags.length} tags)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-300">
+                    Reels Hashtags ({igHashtags.length} tags)
+                  </label>
+                  {allSuggestedHashtags.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAutoAddAllSuggestedHashtags}
+                      className="flex items-center space-x-1 text-[11px] text-pink-400 hover:text-pink-300 font-semibold transition-colors"
+                      title="Automatically populate Reels hashtags with all viral tags discovered by Gemini and Trend Finder"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Auto-Add Viral Hashtags</span>
+                    </button>
+                  )}
+                </div>
+
+                {allSuggestedHashtags.filter((h) => !igHashtags.map((t) => t.toLowerCase()).includes(h.toLowerCase())).length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 mb-2">
+                    <span className="text-[10px] text-slate-500">Viral suggestions:</span>
+                    {allSuggestedHashtags
+                      .filter((h) => !igHashtags.map((t) => t.toLowerCase()).includes(h.toLowerCase()))
+                      .slice(0, 8)
+                      .map((h) => (
+                        <button
+                          key={h}
+                          type="button"
+                          onClick={() => setIgHashtags((prev) => [...prev, h])}
+                          className="px-2 py-0.5 rounded text-[10px] bg-pink-950/50 hover:bg-pink-900/60 text-pink-300 border border-pink-500/30 flex items-center space-x-1 transition-colors"
+                        >
+                          <span>+ {h}</span>
+                        </button>
+                      ))}
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-1.5 bg-slate-950 p-2.5 rounded-xl border border-slate-800 mb-2 min-h-12 items-center">
                   {igHashtags.map((tag) => (
                     <span
@@ -515,11 +819,21 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
                 {/* Bottom Overlay with channel & title */}
                 <div className="space-y-2 pr-12">
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-[10px] font-bold text-white">
-                      Y
-                    </div>
-                    <span className="text-xs font-semibold text-white drop-shadow">@CreatorChannel</span>
-                    <button className="px-2 py-0.5 rounded-full bg-white text-black text-[10px] font-bold">
+                    {currentYtAccount?.avatarUrl ? (
+                      <img
+                        src={currentYtAccount.avatarUrl}
+                        alt="Channel Avatar"
+                        className="w-6 h-6 rounded-full object-cover ring-1 ring-white/50 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+                        {currentYtAccount?.name ? currentYtAccount.name.charAt(0) : 'Y'}
+                      </div>
+                    )}
+                    <span className="text-xs font-semibold text-white drop-shadow truncate max-w-[130px]">
+                      {currentYtAccount?.name || '@CreatorChannel'}
+                    </span>
+                    <button className="px-2 py-0.5 rounded-full bg-white text-black text-[10px] font-bold shrink-0">
                       Subscribe
                     </button>
                   </div>
@@ -579,13 +893,23 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
                 {/* Bottom Overlay with handle & caption */}
                 <div className="space-y-2 pr-12">
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 p-[1.5px]">
-                      <div className="w-full h-full rounded-full bg-black flex items-center justify-center text-[9px] font-bold text-white">
-                        IG
-                      </div>
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 p-[1.5px] shrink-0">
+                      {currentIgAccount?.avatarUrl ? (
+                        <img
+                          src={currentIgAccount.avatarUrl}
+                          alt="IG Avatar"
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full rounded-full bg-black flex items-center justify-center text-[9px] font-bold text-white">
+                          {currentIgAccount?.name ? currentIgAccount.name.charAt(0) : 'IG'}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs font-semibold text-white drop-shadow">@creator_reels</span>
-                    <button className="px-2 py-0.5 rounded border border-white/40 text-[10px] font-medium text-white">
+                    <span className="text-xs font-semibold text-white drop-shadow truncate max-w-[130px]">
+                      {currentIgAccount?.handle || currentIgAccount?.name || '@creator_reels'}
+                    </span>
+                    <button className="px-2 py-0.5 rounded border border-white/40 text-[10px] font-medium text-white shrink-0">
                       Follow
                     </button>
                   </div>

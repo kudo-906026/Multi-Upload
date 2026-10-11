@@ -4,29 +4,36 @@ import path from 'path';
 // Load environment variables from .env
 dotenv.config();
 
+const port = parseInt(process.env.PORT || '8080', 10);
+const rawBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
+// Normalize base URL without trailing slash
+const publicBaseUrl = rawBaseUrl.replace(/\/+$/, '');
+
 export const config = {
-  port: parseInt(process.env.PORT || '8080', 10),
+  port,
   nodeEnv: process.env.NODE_ENV || 'development',
   
-  // Public base URL (used for media access by Instagram)
-  publicBaseUrl: process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 8080}`,
+  // Public base URL (for OAuth callbacks & video serving)
+  publicBaseUrl,
 
-  // Gemini API
+  // Encryption key for securing stored OAuth tokens at rest (AES-256-GCM)
+  encryptionKey: process.env.TOKEN_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY || '',
+
+  // Gemini API Key
   geminiApiKey: process.env.GEMINI_API_KEY || '',
 
-  // YouTube / Google OAuth
-  youtube: {
-    clientId: process.env.YOUTUBE_CLIENT_ID || '',
-    clientSecret: process.env.YOUTUBE_CLIENT_SECRET || '',
-    redirectUri: process.env.YOUTUBE_REDIRECT_URI || `http://localhost:${process.env.PORT || 8080}/api/auth/youtube/callback`,
-    refreshToken: process.env.YOUTUBE_REFRESH_TOKEN || '',
+  // Google / YouTube Developer App Credentials
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || process.env.YOUTUBE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || process.env.YOUTUBE_CLIENT_SECRET || '',
+    redirectUri: `${publicBaseUrl}/api/auth/youtube/callback`,
   },
 
-  // Instagram Graph API
-  instagram: {
-    accessToken: process.env.INSTAGRAM_ACCESS_TOKEN || '',
-    userId: process.env.INSTAGRAM_USER_ID || '',
-    tokenIssuedAt: process.env.INSTAGRAM_TOKEN_ISSUED_AT ? new Date(process.env.INSTAGRAM_TOKEN_ISSUED_AT) : new Date(),
+  // Meta / Instagram Developer App Credentials
+  meta: {
+    appId: process.env.META_APP_ID || process.env.INSTAGRAM_CLIENT_ID || process.env.META_CLIENT_ID || '',
+    appSecret: process.env.META_APP_SECRET || process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_CLIENT_SECRET || '',
+    redirectUri: `${publicBaseUrl}/api/auth/instagram/callback`,
   },
 
   // Google Cloud Storage (Optional)

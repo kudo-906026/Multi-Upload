@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, Globe, TrendingUp, Compass, CheckCircle2, ChevronDown, RefreshCw, FileDown } from 'lucide-react';
 import { AIAnalysisResult, VideoMetadata, AITone } from '@shared/types';
 import { ApiClient } from '../api';
@@ -9,17 +9,26 @@ interface AIAnalysisCardProps {
   video: VideoMetadata | null;
   onAnalysisComplete: (result: AIAnalysisResult) => void;
   analysisResult: AIAnalysisResult | null;
+  trendContext?: { topic: string; hashtags: string[] } | null;
 }
 
 export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
   video,
   onAnalysisComplete,
   analysisResult,
+  trendContext,
 }) => {
-  const [topicHint, setTopicHint] = useState('');
+  const [topicHint, setTopicHint] = useState(trendContext?.topic || '');
   const [selectedTone, setSelectedTone] = useState<AITone>('viral_hook');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Sync trendContext if updated externally
+  useEffect(() => {
+    if (trendContext?.topic) {
+      setTopicHint(trendContext.topic);
+    }
+  }, [trendContext]);
 
   const handleRunAnalysis = async () => {
     if (!video) return;
@@ -27,9 +36,14 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
     setIsAnalyzing(true);
 
     try {
+      const descriptionHint = trendContext?.hashtags?.length
+        ? `Target trending hashtags: ${trendContext.hashtags.join(' ')}`
+        : undefined;
+
       const result = await ApiClient.analyzeVideo({
         filename: video.originalName,
         titleHint: topicHint.trim() || undefined,
+        descriptionHint,
         tone: selectedTone,
       });
       onAnalysisComplete(result);
@@ -48,17 +62,17 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
   ];
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 sm:p-6 shadow-xl space-y-5 sm:space-y-6 w-full max-w-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
         <div>
           <div className="flex items-center space-x-2">
-            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">
+            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
               2
             </span>
-            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              Gemini AI Trend Analysis with Google Search Grounding
-              <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span>Gemini AI Trend Analysis</span>
+              <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                 Grounding Active
               </span>
             </h2>
@@ -91,6 +105,19 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
       {/* Input Prompts & Tones */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
+          {trendContext && (
+            <div className="mb-2 p-2 bg-indigo-950/60 border border-indigo-500/40 rounded-xl flex items-center justify-between text-xs text-indigo-300">
+              <span className="flex items-center gap-1.5 truncate">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Trend: <strong>"{trendContext.topic}"</strong></span>
+              </span>
+              {trendContext.hashtags.length > 0 && (
+                <span className="text-[10px] text-indigo-400 font-mono hidden sm:inline">
+                  +{trendContext.hashtags.length} tags
+                </span>
+              )}
+            </div>
+          )}
           <label className="block text-xs font-semibold text-slate-300 mb-1.5">
             Video Subject / Topic Context (Optional)
           </label>

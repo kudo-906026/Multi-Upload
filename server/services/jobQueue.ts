@@ -62,6 +62,10 @@ export class JobQueueService {
   static createJob(params: {
     video: VideoMetadata;
     targetPlatforms: Platform[];
+    selectedAccounts?: {
+      youtubeAccountId?: string;
+      instagramAccountId?: string;
+    };
     youtubePayload?: YouTubePublishPayload;
     instagramPayload?: InstagramPublishPayload;
   }): PublishJob {
@@ -98,6 +102,7 @@ export class JobQueueService {
       id: jobId,
       video: params.video,
       targetPlatforms: params.targetPlatforms,
+      selectedAccounts: params.selectedAccounts,
       metadata: {
         youtube: params.youtubePayload,
         instagram: params.instagramPayload,
@@ -182,7 +187,8 @@ export class JobQueueService {
           ytResult.lastUpdated = new Date().toISOString();
           ytResult.logs.push(`[${new Date().toLocaleTimeString()}] ${stage}`);
           this.persist();
-        }
+        },
+        job.selectedAccounts?.youtubeAccountId
       );
 
       ytResult.status = 'published';
@@ -223,7 +229,8 @@ export class JobQueueService {
           igResult.lastUpdated = new Date().toISOString();
           igResult.logs.push(`[${new Date().toLocaleTimeString()}] ${stage}`);
           this.persist();
-        }
+        },
+        job.selectedAccounts?.instagramAccountId
       );
 
       igResult.status = 'published';

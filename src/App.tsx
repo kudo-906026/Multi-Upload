@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Video, Flame, History, Users, Settings } from 'lucide-react';
 import { Header } from './components/Header';
 import { VideoUploader } from './components/VideoUploader';
+import { VideoFormatStep } from './components/VideoFormatStep';
+import { TrendsView } from './components/TrendsView';
 import { AIAnalysisCard } from './components/AIAnalysisCard';
 import { MetadataReview } from './components/MetadataReview';
 import { PresetsManager } from './components/PresetsManager';
 import { JobQueueView } from './components/JobQueueView';
 import { PlatformSettingsModal } from './components/PlatformSettingsModal';
+import { AccountsView } from './components/AccountsView';
 import { DownloadAppModal } from './components/DownloadAppModal';
 import {
   Platform,
@@ -20,9 +24,10 @@ import {
 import { ApiClient } from './api';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'create' | 'presets' | 'queue' | 'settings'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'trends' | 'presets' | 'queue' | 'accounts' | 'settings'>('create');
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(['youtube', 'instagram']);
   const [currentVideo, setCurrentVideo] = useState<VideoMetadata | null>(null);
+  const [trendContext, setTrendContext] = useState<{ topic: string; hashtags: string[] } | null>(null);
   const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
   const [presets, setPresets] = useState<PlatformPreset[]>([]);
   const [jobs, setJobs] = useState<PublishJob[]>([]);
@@ -118,6 +123,10 @@ export const App: React.FC = () => {
   const handlePublish = async (payloads: {
     youtubePayload?: YouTubePublishPayload;
     instagramPayload?: InstagramPublishPayload;
+    selectedAccounts?: {
+      youtubeAccountId?: string;
+      instagramAccountId?: string;
+    };
   }) => {
     if (!currentVideo) return;
     setIsPublishing(true);
@@ -126,6 +135,7 @@ export const App: React.FC = () => {
       const newJob = await ApiClient.publishJob({
         video: currentVideo,
         targetPlatforms: selectedPlatforms,
+        selectedAccounts: payloads.selectedAccounts,
         youtubePayload: payloads.youtubePayload,
         instagramPayload: payloads.instagramPayload,
       });
@@ -145,7 +155,7 @@ export const App: React.FC = () => {
   ).length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-x-hidden w-full max-w-full">
       {/* Navigation Header */}
       <Header
         activeTab={activeTab}
@@ -158,9 +168,9 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-8 pb-20 sm:pb-8 space-y-6 sm:space-y-8">
         {activeTab === 'create' && (
-          <div className="space-y-8 animate-fade-in">
+          <div className="space-y-6 sm:space-y-8 animate-fade-in w-full max-w-full">
             {/* Step 1: Video Uploader & Platform Choice */}
             <VideoUploader
               onVideoUploaded={(video) => setCurrentVideo(video)}
@@ -171,18 +181,30 @@ export const App: React.FC = () => {
                 setCurrentVideo(null);
                 setAiResult(null);
               }}
+              authStatus={authStatus}
+              onOpenAccounts={() => setActiveTab('accounts')}
             />
 
-            {/* Step 2: Gemini AI Analysis with Search Grounding */}
+            {/* Step 2: Aspect Ratio Adjuster & Trimmer */}
+            {currentVideo && (
+              <VideoFormatStep
+                video={currentVideo}
+                selectedPlatforms={selectedPlatforms}
+                onFormatApplied={(formattedVideo) => setCurrentVideo(formattedVideo)}
+              />
+            )}
+
+            {/* Step 3: Gemini AI Analysis with Search Grounding */}
             {currentVideo && (
               <AIAnalysisCard
                 video={currentVideo}
                 onAnalysisComplete={(result) => setAiResult(result)}
                 analysisResult={aiResult}
+                trendContext={trendContext}
               />
             )}
 
-            {/* Step 3: Review, Edit & Publish */}
+            {/* Step 4: Review, Edit & Publish */}
             {currentVideo && (
               <MetadataReview
                 selectedPlatforms={selectedPlatforms}
@@ -190,9 +212,28 @@ export const App: React.FC = () => {
                 onPublish={handlePublish}
                 isPublishing={isPublishing}
                 presets={presets}
+                authStatus={authStatus}
+                onOpenAccounts={() => setActiveTab('accounts')}
+                trendContext={trendContext}
               />
             )}
           </div>
+        )}
+
+        {activeTab === 'trends' && (
+          <TrendsView
+            onUseTrendInStudio={(topic, hashtags) => {
+              setTrendContext({ topic, hashtags });
+              setActiveTab('create');
+            }}
+          />
+        )}
+
+        {activeTab === 'accounts' && (
+          <AccountsView
+            authStatus={authStatus}
+            onRefresh={loadInitialData}
+          />
         )}
 
         {activeTab === 'presets' && (
@@ -220,6 +261,74 @@ export const App: React.FC = () => {
         )}
       </main>
 
+      {/* Mobile Sticky Bottom Tab Bar (Visible under 640px) */}
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 flex items-center justify-around">
+        {/* Studio Tab */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('create')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
+            activeTab === 'create' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Video className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5">Studio</span>
+        </button>
+
+        {/* Trends Tab (Separate bottom tab next to Studio) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('trends')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
+            activeTab === 'trends' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Flame className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5">Trends</span>
+        </button>
+
+        {/* Queue Tab */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('queue')}
+          className={`relative flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
+            activeTab === 'queue' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5">Queue</span>
+          {activeJobsCount > 0 && (
+            <span className="absolute top-1 right-2 w-3.5 h-3.5 rounded-full bg-pink-500 text-white text-[8px] font-bold flex items-center justify-center">
+              {activeJobsCount}
+            </span>
+          )}
+        </button>
+
+        {/* Accounts Tab */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('accounts')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
+            activeTab === 'accounts' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5">Accounts</span>
+        </button>
+
+        {/* Settings Tab */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('settings')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
+            activeTab === 'settings' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Settings className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5">Settings</span>
+        </button>
+      </nav>
+
       {/* Download / Install App Modal */}
       <DownloadAppModal
         isOpen={isDownloadModalOpen}
@@ -229,7 +338,7 @@ export const App: React.FC = () => {
       />
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-black/40 py-6 text-center text-xs text-slate-500">
+      <footer className="border-t border-slate-900 bg-black/40 py-6 text-center text-xs text-slate-500 mb-12 sm:mb-0">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>OmniPost Video &copy; 2026 • Powered by Gemini AI & Google Search Grounding</span>
           <span>YouTube Data API v3 • Meta Instagram Graph API</span>

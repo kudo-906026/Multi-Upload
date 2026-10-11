@@ -3,10 +3,23 @@
 @tailwind utilities;
 
 @layer base {
+  *, ::before, ::after {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    overflow-x: hidden;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     background-color: #090D16;
     color: #F1F5F9;
+    margin: 0;
+    padding: 0;
   }
 
   code, pre {
@@ -47,3 +60,15 @@
 .glow-instagram {
   box-shadow: 0 0 25px -5px rgba(225, 48, 108, 0.25);
 }
+
+/* Ensure video elements stay strictly inside normal document flow and never float above sticky header */
+video {
+  max-width: 100%;
+  position: static !important;
+  display: block;
+}
+
+header {
+  isolation: isolate;
+}
+

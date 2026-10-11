@@ -47,6 +47,64 @@ export interface GrowthDataPoint {
   searchInterest: number; // 0 - 100
 }
 
+export type AspectRatioOption = '9:16' | '1:1' | '4:5' | '16:9' | 'original';
+
+export type FormatMode = 'crop' | 'fit_blurred' | 'fit_solid';
+
+export interface CropFocusPoint {
+  x: number; // 0 to 100%
+  y: number; // 0 to 100%
+}
+
+export interface VideoFormatSettings {
+  aspectRatio: AspectRatioOption;
+  mode: FormatMode;
+  focusPoint?: CropFocusPoint; // default { x: 50, y: 50 }
+  solidBgColor?: string; // default '#000000'
+  trimStartSec?: number; // 0
+  trimEndSec?: number; // duration
+}
+
+export interface PlatformFormatSettings {
+  youtube?: VideoFormatSettings;
+  instagram?: VideoFormatSettings;
+  separatePerPlatform?: boolean;
+}
+
+export interface ConversionProgress {
+  status: 'idle' | 'converting' | 'completed' | 'failed';
+  percent: number; // 0 - 100
+  stage: string;
+  error?: string;
+  convertedUrl?: string;
+}
+
+export interface TrendItem {
+  id: string;
+  topic: string;
+  whyTrending: string;
+  suggestedEditStyle: string;
+  suggestedHashtags: string[];
+  suggestedAudioStyle: string;
+  difficulty: 'Low' | 'Medium' | 'High';
+  competitionScore: number; // 1 - 10
+  searchInterest: number; // 1 - 100
+  youtubeTrendingReference?: {
+    title: string;
+    channelTitle: string;
+    viewCount?: string;
+    videoUrl?: string;
+  };
+}
+
+export interface NicheTrendReport {
+  niche: string;
+  region: string;
+  lastUpdated: string;
+  cachedUntil: string;
+  items: TrendItem[];
+}
+
 export interface AIAnalysisResult {
   topic: string;
   detectedTone: string;
@@ -68,6 +126,10 @@ export interface VideoMetadata {
   durationSec?: number;
   width?: number;
   height?: number;
+  formatSettings?: VideoFormatSettings;
+  platformFormats?: PlatformFormatSettings;
+  convertedPath?: string;
+  convertedUrl?: string;
   createdAt: string;
 }
 
@@ -101,10 +163,28 @@ export interface InstagramPublishPayload {
   shareToFeed: boolean;
 }
 
+export interface ConnectedAccount {
+  id: string;
+  platform: Platform;
+  name: string; // YouTube Channel Name or Instagram Name/Username
+  handle?: string; // @handle or @username
+  avatarUrl?: string;
+  platformAccountId: string; // YouTube Channel ID or Instagram User ID
+  connectedAt: string;
+  expiresAt?: string; // For Instagram (ISO string)
+  tokenDaysRemaining?: number; // Calculated for Instagram
+  needsRefresh?: boolean;
+  isDefault?: boolean;
+}
+
 export interface PublishJob {
   id: string;
   video: VideoMetadata;
   targetPlatforms: Platform[];
+  selectedAccounts?: {
+    youtubeAccountId?: string;
+    instagramAccountId?: string;
+  };
   metadata: {
     youtube?: YouTubePublishPayload;
     instagram?: InstagramPublishPayload;
@@ -125,6 +205,7 @@ export interface PlatformAuthStatus {
     channelTitle?: string;
     tokenExpiry?: string;
     needsReauth: boolean;
+    accounts: ConnectedAccount[];
   };
   instagram: {
     configured: boolean;
@@ -132,6 +213,14 @@ export interface PlatformAuthStatus {
     username?: string;
     tokenDaysRemaining?: number;
     needsRefresh: boolean;
+    accounts: ConnectedAccount[];
+  };
+  developerConfig?: {
+    googleConfigured: boolean;
+    metaConfigured: boolean;
+    googleRedirectUri: string;
+    metaRedirectUri: string;
+    publicBaseUrl: string;
   };
 }
 

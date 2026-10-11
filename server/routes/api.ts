@@ -9,11 +9,16 @@ import { YouTubeService } from '../services/youtubeService.js';
 import { InstagramService } from '../services/instagramService.js';
 import { PresetService } from '../services/presetService.js';
 import { JobQueueService } from '../services/jobQueue.js';
-import { ApiResponse, PlatformAuthStatus, Platform } from '../../shared/types.js';
+import { AccountStorageService } from '../services/accountStorage.js';
+import { FFmpegService } from '../services/ffmpegService.js';
+import { TrendService } from '../services/trendService.js';
+import { config } from '../config.js';
+import { ApiResponse, PlatformAuthStatus, Platform, ConnectedAccount, VideoFormatSettings, PlatformFormatSettings, VideoMetadata } from '../../shared/types.js';
 
 const router = Router();
 
-// Multer setup with validation for video formats and 250MB limit
+// Multer setup with support for 1GB video upload and extensive media formats:
+// MP4, MOV, WebM, MKV, AVI, M4V, 3GP, FLV, WMV, MPEG, and HEVC
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, path.resolve(process.cwd(), 'uploads'));
@@ -27,19 +32,41 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 250 * 1024 * 1024, // 250MB
+    fileSize: 1024 * 1024 * 1024, // 1 GB limit
   },
   fileFilter: (req, file, cb) => {
-    const allowedMimeTypes = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
-    if (allowedMimeTypes.includes(file.mimetype) || file.originalname.match(/\.(mp4|mov|webm|mkv)$/i)) {
+    const allowedExtensions = /\.(mp4|mov|webm|mkv|avi|m4v|3gp|flv|wmv|mpeg|mpg|hevc|h265|ts)$/i;
+    const allowedMimeTypes = [
+      'video/mp4',
+      'video/quicktime',
+      'video/webm',
+      'video/x-matroska',
+      'video/x-msvideo',
+      'video/x-m4v',
+      'video/3gpp',
+      'video/x-flv',
+      'video/x-ms-wmv',
+      'video/mpeg',
+      'video/hevc',
+      'video/mp2t',
+      'application/octet-stream',
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype) || file.originalname.match(allowedExtensions)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file format. Please upload an MP4, MOV, or WebM video.'));
+      cb(new Error('Unsupported video format. Please upload MP4, MOV, WebM, MKV, AVI, M4V, 3GP, FLV, WMV, MPEG, or HEVC.'));
     }
   },
 });
 
-// --- Auth Routes ---
+// Memory storage for small chunk uploads in resumable flow
+const chunkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB max per chunk (Cloud Run safe)
+});
+
+// --- Multi-Account & Auth Routes ---
 router.get('/auth/status', (req: Request, res: Response) => {
   const yt = YouTubeService.getAuthStatus();
   const ig = InstagramService.getAuthStatus();
@@ -47,13 +74,56 @@ router.get('/auth/status', (req: Request, res: Response) => {
   const data: PlatformAuthStatus = {
     youtube: yt,
     instagram: ig,
+    developerConfig: {
+      googleConfigured: Boolean(config.google.clientId && config.google.clientSecret),
+      metaConfigured: Boolean(config.meta.appId && config.meta.appSecret),
+      googleRedirectUri: config.google.redirectUri,
+      metaRedirectUri: config.meta.redirectUri,
+      publicBaseUrl: config.publicBaseUrl,
+    },
   };
 
   res.json({ success: true, data });
 });
 
+// List all connected accounts (sanitized, zero token leakage)
+router.get('/accounts', (req: Request, res: Response) => {
+  const platform = req.query.platform as Platform | undefined;
+  const accounts = AccountStorageService.getPublicAccounts(platform);
+  res.json({ success: true, data: accounts });
+});
+
+// Disconnect / Delete an account
+router.delete('/accounts/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const deleted = AccountStorageService.removeAccount(id);
+  if (deleted) {
+    res.json({ success: true, message: 'Account disconnected successfully.' });
+  } else {
+    res.status(404).json({ success: false, error: 'Account not found.' });
+  }
+});
+
+// Set default account for a platform
+router.post('/accounts/:id/default', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updated = AccountStorageService.setDefault(id);
+  if (updated) {
+    res.json({ success: true, message: 'Default account updated.' });
+  } else {
+    res.status(404).json({ success: false, error: 'Account not found.' });
+  }
+});
+
+// --- YouTube Google OAuth 2.0 Flow ---
 router.get('/auth/youtube/url', (req: Request, res: Response) => {
   try {
+    if (!config.google.clientId || !config.google.clientSecret) {
+      return res.status(400).json({
+        success: false,
+        error: 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not configured in environment variables.',
+      });
+    }
     const url = YouTubeService.getAuthUrl();
     res.json({ success: true, data: { url } });
   } catch (err: any) {
@@ -61,33 +131,129 @@ router.get('/auth/youtube/url', (req: Request, res: Response) => {
   }
 });
 
+// Direct browser OAuth callback from Google
+router.get('/auth/youtube/callback', async (req: Request, res: Response) => {
+  try {
+    const { code, error } = req.query;
+    if (error) {
+      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
+    }
+    if (!code) {
+      return res.redirect('/?auth_error=missing_code');
+    }
+    await YouTubeService.handleCallback(String(code));
+    return res.redirect('/?connected=youtube');
+  } catch (err: any) {
+    console.error('[YouTubeCallback] Error:', err);
+    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'OAuth exchange failed')}`);
+  }
+});
+
+// JSON API OAuth callback exchange (for popup / in-app exchanges)
 router.post('/auth/youtube/callback', async (req: Request, res: Response) => {
   try {
     const { code } = req.body;
     if (!code) {
       return res.status(400).json({ success: false, error: 'Authorization code is required' });
     }
-    const result = await YouTubeService.exchangeCode(code);
-    res.json({ success: true, data: result, message: 'YouTube successfully authorized!' });
+    const account = await YouTubeService.handleCallback(code);
+    res.json({ success: true, data: account, message: `Connected YouTube channel: ${account.name}` });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
+// --- Instagram API with Instagram Login Flow ---
+router.get('/auth/instagram/url', (req: Request, res: Response) => {
+  try {
+    if (!config.meta.appId || !config.meta.appSecret) {
+      return res.status(400).json({
+        success: false,
+        error: 'META_APP_ID and META_APP_SECRET are not configured in environment variables.',
+      });
+    }
+    const url = InstagramService.getAuthUrl();
+    res.json({ success: true, data: { url } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Direct browser OAuth callback from Meta
+router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
+  try {
+    const { code, error } = req.query;
+    if (error) {
+      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
+    }
+    if (!code) {
+      return res.redirect('/?auth_error=missing_code');
+    }
+    await InstagramService.handleCallback(String(code));
+    return res.redirect('/?connected=instagram');
+  } catch (err: any) {
+    console.error('[InstagramCallback] Error:', err);
+    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'Meta OAuth exchange failed')}`);
+  }
+});
+
+// JSON API OAuth callback exchange
+router.post('/auth/instagram/callback', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: 'Authorization code is required' });
+    }
+    const account = await InstagramService.handleCallback(code);
+    res.json({ success: true, data: account, message: `Connected Instagram account: ${account.name}` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Refresh default Instagram account token
 router.post('/auth/instagram/refresh', async (req: Request, res: Response) => {
   try {
-    const result = await InstagramService.refreshLongLivedToken();
+    const defaultAccount = AccountStorageService.getDefaultAccountTokens('instagram');
+    const accountId = defaultAccount?.account?.id;
+    if (!accountId) {
+      return res.status(400).json({ success: false, error: 'No Instagram account connected to refresh.' });
+    }
+    const result = await InstagramService.refreshAccountToken(accountId);
     if (result.success) {
-      res.json({ success: true, data: result, message: `Instagram token refreshed! ${result.daysRemaining} days remaining.` });
+      res.json({
+        success: true,
+        data: result,
+        message: `Instagram token refreshed! 60 days remaining.`,
+      });
     } else {
-      res.status(400).json({ success: false, error: result.error || 'Failed to refresh Instagram token' });
+      res.status(400).json({ success: false, error: result.error || 'Failed to refresh token' });
     }
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// --- Video Upload Route ---
+// Refresh Instagram long-lived token for a specific account
+router.post('/auth/instagram/:id/refresh', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await InstagramService.refreshAccountToken(id);
+    if (result.success) {
+      res.json({
+        success: true,
+        data: result,
+        message: `Instagram token refreshed! 60 days remaining.`,
+      });
+    } else {
+      res.status(400).json({ success: false, error: result.error || 'Failed to refresh token' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- Video Upload & 1GB Resumable Upload Routes ---
 router.post('/upload', upload.single('video') as any, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -99,6 +265,132 @@ router.post('/upload', upload.single('video') as any, async (req: Request, res: 
   } catch (err: any) {
     console.error('[UploadRoute] Upload error:', err);
     res.status(500).json({ success: false, error: err.message || 'Video upload failed' });
+  }
+});
+
+// Initialize 1GB Resumable Upload Session (Direct GCS or Backend Chunks)
+router.post('/upload/resumable/init', async (req: Request, res: Response) => {
+  try {
+    const { originalName, totalSize, mimeType } = req.body;
+    if (!originalName || !totalSize) {
+      return res.status(400).json({ success: false, error: 'originalName and totalSize are required' });
+    }
+
+    const session = await VideoStorageService.initResumableSession({
+      originalName,
+      totalSize: Number(totalSize),
+      mimeType: mimeType || 'video/mp4',
+    });
+
+    res.json({ success: true, data: session });
+  } catch (err: any) {
+    console.error('[ResumableInit] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to initialize resumable upload' });
+  }
+});
+
+// Stream chunk for resumable upload (each chunk < 30MB, defeating Cloud Run 32MB body limit)
+router.post('/upload/resumable/chunk', chunkUpload.single('chunk') as any, async (req: Request, res: Response) => {
+  try {
+    const { sessionId, isLastChunk } = req.body;
+    if (!sessionId || !req.file) {
+      return res.status(400).json({ success: false, error: 'sessionId and chunk data are required' });
+    }
+
+    const result = await VideoStorageService.appendChunk(
+      sessionId,
+      req.file.buffer,
+      isLastChunk === 'true' || isLastChunk === true
+    );
+
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[ResumableChunk] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Chunk append failed' });
+  }
+});
+
+// Check background FFmpeg transcoding status
+router.get('/conversion/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const progress = VideoStorageService.getConversionProgress(id);
+  res.json({ success: true, data: progress });
+});
+
+// --- Aspect Ratio Adjustment & Trimming with FFmpeg ---
+router.post('/video/:id/format', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { format, platformFormats, originalPath } = req.body;
+
+    if (!format || !format.aspectRatio || !format.mode) {
+      return res.status(400).json({ success: false, error: 'Valid format settings are required' });
+    }
+
+    // Locate source video file
+    let inputPath = originalPath || VideoStorageService.getFilePath(`${id}.mp4`);
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      // Look for any extension with this id
+      const uploadsDir = path.resolve(process.cwd(), 'uploads');
+      const files = fs.readdirSync(uploadsDir);
+      const matched = files.find((f) => f.startsWith(id) && !f.includes('_formatted'));
+      if (matched) {
+        inputPath = path.join(uploadsDir, matched);
+      }
+    }
+
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      return res.status(404).json({ success: false, error: `Video file for ID ${id} not found.` });
+    }
+
+    const safeRatio = String(format.aspectRatio).replace(':', 'x');
+    const formattedFilename = `${id}_formatted_${safeRatio}.mp4`;
+    const outputPath = path.join(path.resolve(process.cwd(), 'uploads'), formattedFilename);
+
+    console.log(`[FormatRoute] Formatting video ${id} with aspect ratio ${format.aspectRatio} (${format.mode})...`);
+
+    const result = await FFmpegService.applyFormatAndTrim({
+      inputPath,
+      outputPath,
+      format,
+    });
+
+    const publicUrl = `${config.publicBaseUrl.replace(/\/$/, '')}/media/${formattedFilename}`;
+
+    const formattedMetadata: Partial<VideoMetadata> = {
+      id,
+      storagePath: result.outputPath,
+      publicUrl,
+      durationSec: result.duration,
+      width: result.width,
+      height: result.height,
+      formatSettings: format,
+      platformFormats,
+    };
+
+    res.json({
+      success: true,
+      data: formattedMetadata,
+      message: `Video formatted to ${format.aspectRatio} successfully!`,
+    });
+  } catch (err: any) {
+    console.error('[FormatRoute] Format error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Video formatting failed' });
+  }
+});
+
+// --- Trend Finder Route (Gemini Google Search Grounding & YouTube Data API) ---
+router.get('/trends', async (req: Request, res: Response) => {
+  try {
+    const niche = String(req.query.niche || 'tech');
+    const region = String(req.query.region || 'US');
+    const forceRefresh = req.query.refresh === 'true';
+
+    const report = await TrendService.getNicheTrends(niche, region, forceRefresh);
+    res.json({ success: true, data: report });
+  } catch (err: any) {
+    console.error('[TrendsRoute] Error fetching trends:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to fetch trending topics' });
   }
 });
 
@@ -172,7 +464,7 @@ router.post('/presets/merge', (req: Request, res: Response) => {
 // --- Publishing & Jobs Routes ---
 router.post('/publish', (req: Request, res: Response) => {
   try {
-    const { video, targetPlatforms, youtubePayload, instagramPayload } = req.body;
+    const { video, targetPlatforms, selectedAccounts, youtubePayload, instagramPayload } = req.body;
 
     if (!video || !video.storagePath) {
       return res.status(400).json({ success: false, error: 'Valid video metadata is required' });
@@ -185,6 +477,7 @@ router.post('/publish', (req: Request, res: Response) => {
     const job = JobQueueService.createJob({
       video,
       targetPlatforms,
+      selectedAccounts,
       youtubePayload,
       instagramPayload,
     });

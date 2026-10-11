@@ -110,9 +110,43 @@ We provide three complete, automated GitHub workflows under `.github/workflows/`
 
 ---
 
-## Environment Variables Setup
+## 🔐 In-App Account Connection & OAuth Setup
 
-Create a `.env` file in the root directory (based on `.env.example`):
+OmniPost Video uses **in-app OAuth 2.0 authentication**. You do not need to manually paste tokens or user IDs into `.env`. Users connect their accounts via the **Accounts** page in the app, and tokens are stored encrypted (**AES-256-GCM**) on the server.
+
+### Exact Redirect URIs to Register
+
+Configure your developer applications with the following exact callback URIs (replace `https://your-domain.com` with your `PUBLIC_BASE_URL` or `http://localhost:8080` for local dev):
+
+| Platform | Developer Portal | Exact Authorized Redirect URI | Required Scopes |
+| :--- | :--- | :--- | :--- |
+| **YouTube** | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | `https://your-domain.com/api/auth/youtube/callback`<br/>*(or `http://localhost:8080/api/auth/youtube/callback`)* | `youtube.upload`<br/>`youtube.readonly`<br/>`userinfo.profile` |
+| **Instagram** | [Meta for Developers](https://developers.facebook.com/apps) | `https://your-domain.com/api/auth/instagram/callback`<br/>*(or `http://localhost:8080/api/auth/instagram/callback`)* | `instagram_basic`<br/>`instagram_content_publish`<br/>`pages_show_list`<br/>`pages_read_engagement` |
+
+#### 1. YouTube (Google Cloud Console):
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable the **YouTube Data API v3**.
+3. Under **OAuth consent screen**, set User Type to External, and add the scopes:
+   - `https://www.googleapis.com/auth/youtube.upload`
+   - `https://www.googleapis.com/auth/youtube.readonly`
+4. Under **Credentials** -> **Create Credentials** -> **OAuth client ID** (Web application):
+   - Add Authorized redirect URI:
+     `https://your-domain.com/api/auth/youtube/callback` (or `http://localhost:8080/api/auth/youtube/callback`)
+5. Copy your **Client ID** and **Client Secret** into `.env`.
+
+#### 2. Instagram (Meta for Developers):
+1. In [Meta for Developers](https://developers.facebook.com/), create an app with the **Instagram Graph API** or **Instagram** product.
+2. Under **Instagram** / **Facebook Login** -> **Settings**, add the Valid OAuth Redirect URI:
+   `https://your-domain.com/api/auth/instagram/callback` (or `http://localhost:8080/api/auth/instagram/callback`)
+3. Copy your **App ID** and **App Secret** into `.env`.
+4. Ensure your Instagram account is an **Instagram Professional (Business or Creator)** account connected to a Facebook page.
+5. Tokens are automatically exchanged for **60-day long-lived tokens** and auto-renewed in the background before expiry.
+
+---
+
+## ⚙️ Environment Variables (.env)
+
+The only environment variables required are developer app credentials and the token encryption key:
 
 ```bash
 # Server Port & Base URL
@@ -122,15 +156,19 @@ PUBLIC_BASE_URL=https://your-cloud-run-service.run.app
 # Gemini API (Google AI Studio)
 GEMINI_API_KEY=your_gemini_api_key
 
-# YouTube Data API v3 (Google Cloud Console OAuth 2.0 Web Application)
-YOUTUBE_CLIENT_ID=your_client_id.apps.googleusercontent.com
-YOUTUBE_CLIENT_SECRET=your_client_secret
-YOUTUBE_REDIRECT_URI=https://your-cloud-run-service.run.app/api/auth/youtube/callback
-YOUTUBE_REFRESH_TOKEN=your_refresh_token
+# Developer App Credentials for Google OAuth (YouTube)
+GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 
-# Meta Instagram Graph API (Instagram Business/Creator Account)
-INSTAGRAM_ACCESS_TOKEN=your_long_lived_user_access_token
-INSTAGRAM_USER_ID=your_instagram_business_account_id
+# Developer App Credentials for Meta OAuth (Instagram)
+META_APP_ID=your_meta_app_id
+META_APP_SECRET=your_meta_app_secret
+
+# Token Encryption Key (AES-256-GCM for backend storage)
+TOKEN_ENCRYPTION_KEY=your_secure_random_32_character_string
+
+# Optional: Google Cloud Storage bucket
+GCS_BUCKET_NAME=
 ```
 
 ---

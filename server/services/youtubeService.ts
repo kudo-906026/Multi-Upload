@@ -1,211 +1,210 @@
 import fs from 'fs';
 import { google } from 'googleapis';
-import axios from 'axios';
 import { config } from '../config.js';
-import { YouTubePublishPayload } from '../../shared/types.js';
+import { YouTubePublishPayload, ConnectedAccount } from '../../shared/types.js';
+import { AccountStorageService, YouTubeTokens } from './accountStorage.js';
 
 export class YouTubeService {
-  private static oauth2Client = new google.auth.OAuth2(
-    config.youtube.clientId,
-    config.youtube.clientSecret,
-    config.youtube.redirectUri
-  );
-
   /**
-   * Check if YouTube OAuth is configured and connected.
+   * Check if YouTube OAuth is configured and returns connected channels.
    */
   static getAuthStatus(): {
     configured: boolean;
     authenticated: boolean;
     channelTitle?: string;
     needsReauth: boolean;
+    accounts: ConnectedAccount[];
   } {
-    const configured = Boolean(config.youtube.clientId && config.youtube.clientSecret);
-    const authenticated = Boolean(config.youtube.refreshToken || (configured && process.env.YOUTUBE_ACCESS_TOKEN));
+    const configured = Boolean(config.google.clientId && config.google.clientSecret);
+    const accounts = AccountStorageService.getPublicAccounts('youtube');
+    const authenticated = accounts.length > 0;
+    const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
 
     return {
       configured,
       authenticated,
-      channelTitle: authenticated ? (process.env.YOUTUBE_CHANNEL_NAME || 'Verified Creator Channel') : undefined,
+      channelTitle: defaultAcc ? defaultAcc.name : undefined,
       needsReauth: !authenticated && configured,
+      accounts,
     };
   }
 
   /**
-   * Generates Google OAuth consent URL for YouTube upload permissions.
+   * Generates Google OAuth 2.0 consent URL for YouTube upload & readonly scopes.
    */
-  static getAuthUrl(): string {
+  static getAuthUrl(customRedirectUri?: string): string {
+    const redirectUri = customRedirectUri || config.google.redirectUri;
+    const oauth2Client = new google.auth.OAuth2(
+      config.google.clientId,
+      config.google.clientSecret,
+      redirectUri
+    );
+
     const scopes = [
       'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube.readonly'
+      'https://www.googleapis.com/auth/youtube.readonly',
+      'https://www.googleapis.com/auth/userinfo.profile',
     ];
 
-    return YouTubeService.oauth2Client.generateAuthUrl({
+    return oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
-      prompt: 'consent'
+      prompt: 'consent',
+      include_granted_scopes: true,
     });
   }
 
   /**
-   * Exchanges authorization code for tokens and saves refresh token.
+   * Exchanges authorization code for tokens, fetches YouTube channel details,
+   * and saves the connected account with encrypted tokens.
    */
-  static async exchangeCode(code: string): Promise<{ refreshToken: string; accessToken: string }> {
-    const { tokens } = await YouTubeService.oauth2Client.getToken(code);
-    if (tokens.refresh_token) {
-      config.youtube.refreshToken = tokens.refresh_token;
-      process.env.YOUTUBE_REFRESH_TOKEN = tokens.refresh_token;
-    }
-    return {
-      refreshToken: tokens.refresh_token || '',
-      accessToken: tokens.access_token || ''
-    };
-  }
+  static async handleCallback(code: string, customRedirectUri?: string): Promise<ConnectedAccount> {
+    const redirectUri = customRedirectUri || config.google.redirectUri;
+    const oauth2Client = new google.auth.OAuth2(
+      config.google.clientId,
+      config.google.clientSecret,
+      redirectUri
+    );
 
-  /**
-   * Obtains a fresh access token using the stored refresh token.
-   */
-  private static async getValidAccessToken(): Promise<string> {
-    if (!config.youtube.refreshToken) {
-      if (process.env.YOUTUBE_ACCESS_TOKEN) {
-        return process.env.YOUTUBE_ACCESS_TOKEN;
-      }
-      throw new Error('YouTube is not connected: Missing refresh token or access token.');
-    }
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
 
-    YouTubeService.oauth2Client.setCredentials({
-      refresh_token: config.youtube.refreshToken
+    // Fetch authorized YouTube Channel details
+    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+    const channelRes = await youtube.channels.list({
+      mine: true,
+      part: ['snippet', 'id', 'statistics'],
     });
 
-    const tokenResponse = await YouTubeService.oauth2Client.getAccessToken();
-    const token = tokenResponse.token;
-    if (!token) {
-      throw new Error('Failed to refresh YouTube access token.');
+    const channelItem = channelRes.data.items?.[0];
+    const channelId = channelItem?.id || `yt-${Date.now()}`;
+    const channelTitle = channelItem?.snippet?.title || 'YouTube Channel';
+    const channelHandle = channelItem?.snippet?.customUrl || `@${channelTitle.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`;
+    const avatarUrl =
+      channelItem?.snippet?.thumbnails?.high?.url ||
+      channelItem?.snippet?.thumbnails?.medium?.url ||
+      channelItem?.snippet?.thumbnails?.default?.url;
+
+    // Check if refresh token exists (Google only returns it on consent)
+    const refreshToken = tokens.refresh_token || '';
+    if (!refreshToken) {
+      console.warn('[YouTubeService] Notice: Google did not return a refresh_token in this exchange (prompt=consent ensures it).');
     }
-    return token;
+
+    const savedAccount = AccountStorageService.saveAccount({
+      platform: 'youtube',
+      platformAccountId: channelId,
+      name: channelTitle,
+      handle: channelHandle,
+      avatarUrl: avatarUrl || undefined,
+      tokens: {
+        refreshToken: refreshToken || (tokens.access_token as string),
+        accessToken: tokens.access_token || '',
+        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : undefined,
+      } as YouTubeTokens,
+    });
+
+    console.log(`[YouTubeService] Successfully connected YouTube channel: "${channelTitle}" (${channelId})`);
+    return savedAccount;
   }
 
   /**
-   * Upload video using YouTube Data API v3 Resumable Upload protocol.
-   * Reports progress callback (0 to 100) and step description.
+   * Uploads vertical video to YouTube Shorts using the specific or default connected account.
    */
   static async uploadVideo(
-    filePath: string,
-    metadata: YouTubePublishPayload,
-    onProgress: (percent: number, stage: string) => void
+    storagePath: string,
+    payload: YouTubePublishPayload,
+    onProgress: (progress: number, stage: string) => void,
+    accountId?: string
   ): Promise<{ videoId: string; url: string }> {
-    const stats = fs.statSync(filePath);
-    const fileSize = stats.size;
+    onProgress(5, 'Authenticating YouTube channel credentials...');
 
-    // Check if real YouTube credentials are present
-    const isConfigured = Boolean(
-      config.youtube.clientId &&
-      config.youtube.clientSecret &&
-      (config.youtube.refreshToken || process.env.YOUTUBE_ACCESS_TOKEN)
-    );
+    // Fetch account with decrypted tokens
+    const creds = accountId
+      ? AccountStorageService.getAccountTokens<YouTubeTokens>(accountId)
+      : AccountStorageService.getDefaultAccountTokens<YouTubeTokens>('youtube');
 
-    if (!isConfigured) {
-      console.warn('[YouTubeService] Real YouTube credentials not detected in .env; initiating high-fidelity simulated resumable upload test.');
-      return this.simulateResumableUpload(fileSize, metadata, onProgress);
+    if (!creds || !creds.tokens.refreshToken) {
+      throw new Error(
+        'No connected YouTube channel found. Please connect your YouTube channel on the Accounts page first.'
+      );
     }
 
-    onProgress(5, 'Authenticating with Google OAuth...');
-    const accessToken = await this.getValidAccessToken();
+    const redirectUri = config.google.redirectUri;
+    const oauth2Client = new google.auth.OAuth2(
+      config.google.clientId,
+      config.google.clientSecret,
+      redirectUri
+    );
 
-    onProgress(15, 'Initiating YouTube resumable upload session...');
-    // Step 1: Initialize resumable upload session
-    const initResponse = await axios.post(
-      'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+    oauth2Client.setCredentials({
+      refresh_token: creds.tokens.refreshToken,
+      access_token: creds.tokens.accessToken,
+    });
+
+    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+
+    if (!fs.existsSync(storagePath)) {
+      throw new Error(`Master video file not found on disk at: ${storagePath}`);
+    }
+
+    const fileSize = fs.statSync(storagePath).size;
+    onProgress(15, `Preparing file upload for ${creds.account.name} (${(fileSize / (1024 * 1024)).toFixed(1)}MB)...`);
+
+    // Ensure Shorts hashtag is present in title/description for viral reach
+    let title = payload.title.trim();
+    if (!title.toLowerCase().includes('#shorts')) {
+      title = `${title} #Shorts`;
+    }
+
+    let description = payload.description.trim();
+    if (!description.toLowerCase().includes('#shorts')) {
+      description = `${description}\n\n#Shorts`;
+    }
+
+    const requestBody = {
+      snippet: {
+        title: title.slice(0, 100),
+        description: description.slice(0, 5000),
+        tags: payload.tags || ['Shorts', 'Viral'],
+        categoryId: payload.categoryId || '28',
+      },
+      status: {
+        privacyStatus: payload.privacyStatus || 'public',
+        selfDeclaredMadeForKids: payload.madeForKids || false,
+      },
+    };
+
+    onProgress(30, 'Initiating resumable upload to YouTube API...');
+
+    const res = await youtube.videos.insert(
       {
-        snippet: {
-          title: metadata.title.slice(0, 100),
-          description: metadata.description,
-          tags: metadata.tags,
-          categoryId: metadata.categoryId || '28'
+        part: ['snippet', 'status'],
+        requestBody,
+        media: {
+          body: fs.createReadStream(storagePath),
         },
-        status: {
-          privacyStatus: metadata.privacyStatus || 'unlisted',
-          selfDeclaredMadeForKids: metadata.madeForKids || false
-        }
       },
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json; charset=UTF-8',
-          'X-Upload-Content-Length': fileSize.toString(),
-          'X-Upload-Content-Type': 'video/mp4'
-        }
+        onUploadProgress: (evt) => {
+          if (evt.bytesRead && fileSize > 0) {
+            const rawProgress = 30 + Math.floor((evt.bytesRead / fileSize) * 60);
+            const progress = Math.min(90, rawProgress);
+            onProgress(progress, `Uploading to YouTube Shorts: ${progress}%`);
+          }
+        },
       }
     );
 
-    const uploadUrl = initResponse.headers['location'];
-    if (!uploadUrl) {
-      throw new Error('Failed to obtain YouTube resumable upload location header.');
-    }
-
-    onProgress(30, 'Uploading video stream in chunks...');
-
-    // Step 2: Upload file stream
-    const fileStream = fs.createReadStream(filePath);
-    let uploadedBytes = 0;
-
-    fileStream.on('data', (chunk) => {
-      uploadedBytes += chunk.length;
-      const pct = Math.min(90, Math.round(30 + (uploadedBytes / fileSize) * 60));
-      onProgress(pct, `Uploading video data (${(uploadedBytes / 1024 / 1024).toFixed(1)}MB / ${(fileSize / 1024 / 1024).toFixed(1)}MB)...`);
-    });
-
-    const uploadResponse = await axios.put(uploadUrl, fileStream, {
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Length': fileSize.toString()
-      },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity
-    });
-
-    onProgress(95, 'Finalizing YouTube video processing & indexing...');
-
-    const videoId = uploadResponse.data?.id;
+    const videoId = res.data.id;
     if (!videoId) {
-      throw new Error('YouTube upload completed but did not return a video ID.');
+      throw new Error('YouTube did not return a valid video ID after upload.');
     }
 
-    onProgress(100, 'Published successfully to YouTube!');
-    return {
-      videoId,
-      url: `https://youtu.be/${videoId}`
-    };
-  }
+    onProgress(95, 'Processing YouTube Shorts video metadata...');
+    const url = `https://youtube.com/shorts/${videoId}`;
+    onProgress(100, `Published to YouTube channel "${creds.account.name}"!`);
 
-  /**
-   * High-fidelity simulated resumable upload for testing and zero-credential environments.
-   */
-  private static async simulateResumableUpload(
-    fileSize: number,
-    metadata: YouTubePublishPayload,
-    onProgress: (percent: number, stage: string) => void
-  ): Promise<{ videoId: string; url: string }> {
-    onProgress(10, 'Initializing YouTube Resumable Session (Test Mode)...');
-    await new Promise((r) => setTimeout(r, 800));
-
-    const totalChunks = 5;
-    for (let i = 1; i <= totalChunks; i++) {
-      const pct = 15 + Math.round((i / totalChunks) * 70);
-      const mb = ((fileSize / 1024 / 1024) * (i / totalChunks)).toFixed(1);
-      onProgress(pct, `Streaming chunk ${i}/${totalChunks} (${mb}MB uploaded)...`);
-      await new Promise((r) => setTimeout(r, 700));
-    }
-
-    onProgress(90, 'Processing video codecs & generating HD playback formats...');
-    await new Promise((r) => setTimeout(r, 1000));
-
-    const mockId = 'dQw4w9WgXcQ' + Math.floor(Math.random() * 1000).toString();
-    onProgress(100, 'Published successfully to YouTube!');
-
-    return {
-      videoId: mockId,
-      url: `https://youtu.be/${mockId}`
-    };
+    return { videoId, url };
   }
 }
