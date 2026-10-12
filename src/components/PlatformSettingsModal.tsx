@@ -50,26 +50,28 @@ export const PlatformSettingsModal: React.FC<PlatformSettingsModalProps> = ({
     }
   };
 
-  const sampleEnv = `# Environment Variables (.env) for Cloud Run
-PORT=8080
-PUBLIC_BASE_URL=https://your-cloud-run-domain.run.app
+  const sampleEnv = `# Environment Variables (.env) for Render & Supabase (Free Tier)
+PORT=10000
+PUBLIC_BASE_URL=https://your-app-name.onrender.com
 
-# Gemini AI (with Search Grounding)
+# 1. Supabase (Database & Video Storage)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=your_supabase_secret_key
+SUPABASE_STORAGE_BUCKET=videos
+
+# 2. Gemini AI (Free from Google AI Studio)
 GEMINI_API_KEY=your_gemini_api_key
 
-# YouTube Data API v3 (Google Cloud Console OAuth 2.0 Client)
-YOUTUBE_CLIENT_ID=your_client_id.apps.googleusercontent.com
-YOUTUBE_CLIENT_SECRET=your_client_secret
-YOUTUBE_REDIRECT_URI=https://your-cloud-run-domain.run.app/api/auth/youtube/callback
-YOUTUBE_REFRESH_TOKEN=your_refresh_token
+# 3. Google OAuth 2.0 (YouTube Data API v3)
+GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_client_secret
 
-# Instagram Graph API (Meta for Developers)
-INSTAGRAM_ACCESS_TOKEN=your_long_lived_user_access_token
-INSTAGRAM_USER_ID=your_instagram_business_account_id
-INSTAGRAM_TOKEN_ISSUED_AT=2026-03-01T00:00:00Z
+# 4. Meta for Developers (Instagram Graph API)
+META_APP_ID=your_meta_app_id
+META_APP_SECRET=your_meta_app_secret
 
-# Optional Google Cloud Storage
-GCS_BUCKET_NAME=your_gcs_bucket_name`;
+# 5. Token Encryption Key (AES-256-GCM)
+TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(sampleEnv);

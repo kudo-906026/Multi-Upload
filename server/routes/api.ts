@@ -268,7 +268,7 @@ router.post('/upload', upload.single('video') as any, async (req: Request, res: 
   }
 });
 
-// Initialize 1GB Resumable Upload Session (Direct GCS or Backend Chunks)
+// Initialize Direct Signed Resumable Upload Session (Direct GCS or Preview Stream)
 router.post('/upload/resumable/init', async (req: Request, res: Response) => {
   try {
     const { originalName, totalSize, mimeType } = req.body;
@@ -289,26 +289,89 @@ router.post('/upload/resumable/init', async (req: Request, res: Response) => {
   }
 });
 
-// Stream chunk for resumable upload (each chunk < 30MB, defeating Cloud Run 32MB body limit)
-router.post('/upload/resumable/chunk', chunkUpload.single('chunk') as any, async (req: Request, res: Response) => {
+// Finalize direct resumable upload session (called after client finishes direct PUT upload)
+router.post('/upload/resumable/finish', async (req: Request, res: Response) => {
   try {
-    const { sessionId, isLastChunk } = req.body;
-    if (!sessionId || !req.file) {
-      return res.status(400).json({ success: false, error: 'sessionId and chunk data are required' });
+    const { sessionId, originalName, mimeType, totalSize } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ success: false, error: 'sessionId is required' });
     }
 
-    const result = await VideoStorageService.appendChunk(
+    const video = await VideoStorageService.finishResumableSession({
       sessionId,
-      req.file.buffer,
-      isLastChunk === 'true' || isLastChunk === true
-    );
+      originalName,
+      mimeType,
+      totalSize: totalSize ? Number(totalSize) : undefined,
+    });
 
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: { isComplete: true, video } });
   } catch (err: any) {
-    console.error('[ResumableChunk] Error:', err);
-    res.status(500).json({ success: false, error: err.message || 'Chunk append failed' });
+    console.error('[ResumableFinish] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to finalize resumable upload' });
   }
 });
+
+// Alias for finish
+router.post('/upload/resumable/complete', async (req: Request, res: Response) => {
+  try {
+    const { sessionId, originalName, mimeType, totalSize } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ success: false, error: 'sessionId is required' });
+    }
+
+    const video = await VideoStorageService.finishResumableSession({
+      sessionId,
+      originalName,
+      mimeType,
+      totalSize: totalSize ? Number(totalSize) : undefined,
+    });
+
+    res.json({ success: true, data: { isComplete: true, video } });
+  } catch (err: any) {
+    console.error('[ResumableComplete] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to finalize resumable upload' });
+  }
+});
+
+// Stream chunk for resumable upload (legacy fallback)
+router.post(
+  '/upload/resumable/chunk',
+  (req: Request, res: Response, next) => {
+    if (req.is('application/json')) {
+      return next();
+    }
+    (chunkUpload.single('chunk') as any)(req, res, next);
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const { sessionId, isLastChunk, originalName, mimeType, totalSize } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ success: false, error: 'sessionId is required' });
+      }
+
+      if (req.file) {
+        const result = await VideoStorageService.appendChunk(
+          sessionId,
+          req.file.buffer,
+          isLastChunk === 'true' || isLastChunk === true
+        );
+        return res.json({ success: true, data: result });
+      }
+
+      // JSON finalization call
+      const video = await VideoStorageService.finishResumableSession({
+        sessionId,
+        originalName,
+        mimeType,
+        totalSize: totalSize ? Number(totalSize) : undefined,
+      });
+      return res.json({ success: true, data: { isComplete: true, video } });
+    } catch (err: any) {
+      console.error('[ResumableChunk] Error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Chunk append failed' });
+    }
+  }
+);
 
 // Check background FFmpeg transcoding status
 router.get('/conversion/:id', (req: Request, res: Response) => {
@@ -516,6 +579,23 @@ router.post('/jobs/:id/retry/:platform', async (req: Request, res: Response) => 
   }
 });
 
+// --- Smart Keyword Generation Route (Gemini SEO Tags & Instagram Alt-Text) ---
+router.post('/smart-keywords', async (req: Request, res: Response) => {
+  try {
+    const { title, description, topic, videoFilename } = req.body;
+    const result = await GeminiService.generateSmartKeywords({
+      title,
+      description,
+      topic,
+      videoFilename,
+    });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[SmartKeywordsRoute] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to generate smart keywords' });
+  }
+});
+
 // --- Direct App Package Download Endpoint ---
 router.get('/download/app', (req: Request, res: Response) => {
   const rootDir = process.cwd();
@@ -538,6 +618,26 @@ router.get('/download/app', (req: Request, res: Response) => {
     }
     return res.status(500).json({ success: false, error: 'App package could not be generated' });
   }
+});
+
+// --- JSON 404 Handler for undefined /api endpoints ---
+// Guarantees the server NEVER returns HTML for any /api route
+router.use((req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    error: `API route not found: ${req.method} ${req.originalUrl || req.path}`,
+  });
+});
+
+// --- Global JSON Error Handler for /api router ---
+// Guarantees all exceptions in API routes return valid JSON
+router.use((err: any, req: Request, res: Response, next: any) => {
+  console.error('[API Router Error]', err);
+  const status = typeof err.status === 'number' ? err.status : (typeof err.statusCode === 'number' ? err.statusCode : 500);
+  res.status(status).json({
+    success: false,
+    error: err.message || 'An API error occurred',
+  });
 });
 
 export default router;

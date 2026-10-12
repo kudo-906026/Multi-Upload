@@ -311,10 +311,10 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
                 <div className="flex items-center space-x-1.5 text-slate-300 font-semibold">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Cloud Run / VPS Ready</span>
+                  <span>Render / Docker / VPS Ready</span>
                 </div>
                 <p className="text-[11px]">
-                  Includes built-in multi-stage Dockerfile, docker-compose.yml, and automated Cloud Run deployment workflow.
+                  Includes built-in multi-stage Dockerfile with FFmpeg, render.yaml blueprint, and zero-cost Supabase Storage support.
                 </p>
               </div>
             </div>

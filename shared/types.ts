@@ -37,6 +37,15 @@ export interface InstagramGeneratedContent {
   hashtags: string[];
   recommendedAudio: string;
   hookSentence: string;
+  altText?: string;
+}
+
+export interface SmartKeywordsResult {
+  focusKeyword: string;
+  youtubeTags: string[];
+  instagramAltText: string;
+  primaryKeywords: string[];
+  seoStrategyTip?: string;
 }
 
 export interface GrowthDataPoint {
@@ -130,6 +139,8 @@ export interface VideoMetadata {
   platformFormats?: PlatformFormatSettings;
   convertedPath?: string;
   convertedUrl?: string;
+  gcsUri?: string;
+  supabasePath?: string;
   createdAt: string;
 }
 
@@ -161,6 +172,7 @@ export interface InstagramPublishPayload {
   caption: string;
   hashtags: string[];
   shareToFeed: boolean;
+  altText?: string;
 }
 
 export interface ConnectedAccount {

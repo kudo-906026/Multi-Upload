@@ -5,7 +5,8 @@ import path from 'path';
 dotenv.config();
 
 const port = parseInt(process.env.PORT || '8080', 10);
-const rawBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
+// Render injects RENDER_EXTERNAL_URL (e.g. https://omnipost-video.onrender.com)
+const rawBaseUrl = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
 // Normalize base URL without trailing slash
 const publicBaseUrl = rawBaseUrl.replace(/\/+$/, '');
 
@@ -36,7 +37,19 @@ export const config = {
     redirectUri: `${publicBaseUrl}/api/auth/instagram/callback`,
   },
 
-  // Google Cloud Storage (Optional)
+  // Supabase Storage & Database Configuration (Free Tier, replaces GCS & Firestore)
+  supabase: {
+    url: (process.env.SUPABASE_URL || '').replace(/\/+$/, ''),
+    key:
+      process.env.SUPABASE_SECRET_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      '',
+    bucket: process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'videos',
+  },
+
+  // Google Cloud Storage (Legacy / Optional)
   gcsBucketName: process.env.GCS_BUCKET_NAME || '',
   
   // Storage upload directory

@@ -5,6 +5,7 @@ import { Storage } from '@google-cloud/storage';
 import { config } from '../config.js';
 import { VideoMetadata, ConversionProgress } from '../../shared/types.js';
 import { FFmpegService } from '../services/ffmpegService.js';
+import { SupabaseService } from '../services/supabaseService.js';
 
 // Ensure upload and temp chunk directory exists
 const CHUNKS_DIR = path.join(config.uploadDir, '.chunks');
@@ -21,6 +22,10 @@ interface ResumableSession {
   totalSize: number;
   mimeType: string;
   tempFilePath: string;
+  isGcs: boolean;
+  isSupabase: boolean;
+  supabasePath?: string;
+  publicUrl?: string;
   receivedBytes: number;
   createdAt: number;
 }
@@ -43,38 +48,103 @@ export class VideoStorageService {
   }
 
   /**
-   * Initialize a 1GB resumable chunked upload session.
-   * If GCS bucket is active, returns direct GCS resumable upload URL.
-   * Otherwise returns internal session ID for chunk streaming (bypasses Cloud Run 32MB limit).
+   * Initialize a direct signed resumable upload session.
+   * Prioritizes Supabase Storage (public bucket) for zero-cost hosting.
+   * If GCS bucket is active, returns direct Google Cloud Storage resumable upload URL.
+   * Otherwise returns internal direct stream upload endpoint for preview environment.
    */
   static async initResumableSession(params: {
     originalName: string;
     totalSize: number;
     mimeType: string;
-  }): Promise<{ sessionId: string; gcsUploadUrl?: string; chunkSize: number }> {
+  }): Promise<{
+    sessionId: string;
+    uploadUrl: string;
+    publicUrl?: string;
+    gcsUploadUrl?: string;
+    isSupabase: boolean;
+    isGcs: boolean;
+    chunkSize: number;
+  }> {
     const id = crypto.randomUUID();
-    const gcs = this.getGcs();
+    const ext = path.extname(params.originalName) || '.mp4';
+    const fileName = `${id}${ext}`;
 
-    if (gcs && config.gcsBucketName) {
+    // 1. Supabase Storage (Free tier, public bucket with signed upload URLs)
+    if (SupabaseService.isConfigured()) {
       try {
-        const ext = path.extname(params.originalName) || '.mp4';
-        const file = gcs.bucket(config.gcsBucketName).file(`raw/${id}${ext}`);
-        const [gcsUploadUrl] = await file.createResumableUpload({
-          metadata: {
-            contentType: params.mimeType,
-            metadata: { originalName: params.originalName },
-          },
-        });
-        return { sessionId: id, gcsUploadUrl, chunkSize: 16 * 1024 * 1024 };
-      } catch (gcsErr) {
-        console.warn('[VideoStorage] GCS createResumableUpload failed, using backend chunking:', gcsErr);
+        const supabaseSession = await SupabaseService.createSignedUploadUrl(fileName);
+        if (supabaseSession) {
+          this.sessions.set(id, {
+            id,
+            originalName: params.originalName,
+            totalSize: params.totalSize,
+            mimeType: params.mimeType,
+            tempFilePath: '',
+            isGcs: false,
+            isSupabase: true,
+            supabasePath: supabaseSession.path,
+            publicUrl: supabaseSession.publicUrl,
+            receivedBytes: 0,
+            createdAt: Date.now(),
+          });
+
+          console.log(`[VideoStorage] Created Supabase Storage signed upload URL for ${fileName}`);
+
+          return {
+            sessionId: id,
+            uploadUrl: supabaseSession.uploadUrl,
+            publicUrl: supabaseSession.publicUrl,
+            isSupabase: true,
+            isGcs: false,
+            chunkSize: 16 * 1024 * 1024,
+          };
+        }
+      } catch (supaErr) {
+        console.warn('[VideoStorage] Supabase createSignedUploadUrl error, falling back:', supaErr);
       }
     }
 
-    const ext = path.extname(params.originalName) || '.mp4';
-    const tempFilePath = path.join(CHUNKS_DIR, `${id}${ext}`);
+    // 2. Google Cloud Storage (legacy/optional)
+    const gcs = this.getGcs();
+    if (gcs && config.gcsBucketName) {
+      try {
+        const file = gcs.bucket(config.gcsBucketName).file(`raw/${fileName}`);
+        const [gcsUploadUrl] = await file.createResumableUpload({
+          metadata: {
+            contentType: params.mimeType,
+            metadata: { originalName: params.originalName, sessionId: id },
+          },
+          origin: '*',
+        });
 
-    // Create empty file
+        this.sessions.set(id, {
+          id,
+          originalName: params.originalName,
+          totalSize: params.totalSize,
+          mimeType: params.mimeType,
+          tempFilePath: '',
+          isGcs: true,
+          isSupabase: false,
+          receivedBytes: 0,
+          createdAt: Date.now(),
+        });
+
+        return {
+          sessionId: id,
+          uploadUrl: gcsUploadUrl,
+          gcsUploadUrl,
+          isSupabase: false,
+          isGcs: true,
+          chunkSize: 16 * 1024 * 1024,
+        };
+      } catch (gcsErr) {
+        console.warn('[VideoStorage] GCS createResumableUpload failed, using direct preview streaming:', gcsErr);
+      }
+    }
+
+    // 3. Preview direct streaming upload endpoint
+    const tempFilePath = path.join(CHUNKS_DIR, `${id}${ext}`);
     fs.writeFileSync(tempFilePath, Buffer.alloc(0));
 
     this.sessions.set(id, {
@@ -83,18 +153,128 @@ export class VideoStorageService {
       totalSize: params.totalSize,
       mimeType: params.mimeType,
       tempFilePath,
+      isGcs: false,
+      isSupabase: false,
       receivedBytes: 0,
       createdAt: Date.now(),
     });
 
+    const directUploadUrl = `${config.publicBaseUrl}/storage/direct-upload/${id}`;
+
     return {
       sessionId: id,
-      chunkSize: 10 * 1024 * 1024, // 10MB default chunks (well under 32MB Cloud Run limit)
+      uploadUrl: directUploadUrl,
+      isSupabase: false,
+      isGcs: false,
+      chunkSize: 16 * 1024 * 1024,
     };
   }
 
   /**
-   * Append binary chunk to resumable upload session.
+   * Handles raw direct stream upload in preview environment without passing through multipart /api parser.
+   */
+  static handleDirectStreamUpload(req: any, res: any): void {
+    const { sessionId } = req.params;
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.tempFilePath) {
+      return res.status(404).json({ success: false, error: `Upload session ${sessionId} not found or expired.` });
+    }
+
+    const writeStream = fs.createWriteStream(session.tempFilePath, { flags: 'w' });
+    req.pipe(writeStream);
+
+    req.on('error', (err: any) => {
+      console.error('[DirectUpload] Request stream error:', err);
+      writeStream.destroy();
+      res.status(500).json({ success: false, error: err.message || 'Stream upload error' });
+    });
+
+    writeStream.on('error', (err: any) => {
+      console.error('[DirectUpload] File write stream error:', err);
+      res.status(500).json({ success: false, error: err.message || 'File write error' });
+    });
+
+    writeStream.on('finish', () => {
+      try {
+        const stats = fs.statSync(session.tempFilePath);
+        session.receivedBytes = stats.size;
+        res.json({
+          success: true,
+          data: {
+            sessionId,
+            receivedBytes: session.receivedBytes,
+            isComplete: true,
+          },
+        });
+      } catch (e: any) {
+        res.status(500).json({ success: false, error: e.message });
+      }
+    });
+  }
+
+  /**
+   * Finalizes direct resumable session (either after direct GCS upload or direct preview stream upload).
+   */
+  static async finishResumableSession(params: {
+    sessionId: string;
+    originalName?: string;
+    mimeType?: string;
+    totalSize?: number;
+  }): Promise<VideoMetadata> {
+    const session = this.sessions.get(params.sessionId);
+    const originalName = params.originalName || session?.originalName || 'video.mp4';
+    const mimeType = params.mimeType || session?.mimeType || 'video/mp4';
+    const ext = path.extname(originalName) || '.mp4';
+    const finalFilename = `${params.sessionId}${ext}`;
+    const targetPath = path.join(config.uploadDir, finalFilename);
+
+    if (session?.isSupabase && session.supabasePath) {
+      // Download from Supabase Storage for local FFmpeg probing and processing
+      try {
+        const fileBuffer = await SupabaseService.downloadFile(session.supabasePath);
+        if (fileBuffer) {
+          fs.writeFileSync(targetPath, fileBuffer);
+        }
+      } catch (dlErr: any) {
+        console.warn('[VideoStorage] Supabase file download notice:', dlErr);
+      }
+    } else if (session?.isGcs && config.gcsBucketName) {
+      const gcs = this.getGcs();
+      if (gcs) {
+        const file = gcs.bucket(config.gcsBucketName).file(`raw/${params.sessionId}${ext}`);
+        try {
+          await file.download({ destination: targetPath });
+        } catch (dlErr: any) {
+          console.warn('[VideoStorage] GCS file download failed:', dlErr);
+        }
+      }
+    } else if (session?.tempFilePath && fs.existsSync(session.tempFilePath)) {
+      if (fs.existsSync(targetPath)) {
+        try { fs.unlinkSync(targetPath); } catch {}
+      }
+      fs.renameSync(session.tempFilePath, targetPath);
+    }
+
+    if (!fs.existsSync(targetPath)) {
+      throw new Error(`Uploaded file not found on disk at ${targetPath}. Please retry.`);
+    }
+
+    this.sessions.delete(params.sessionId);
+    const metadata = await this.finalizeVideoRecord(params.sessionId, originalName, targetPath, mimeType);
+    if (session?.isSupabase && session.supabasePath) {
+      metadata.supabasePath = session.supabasePath;
+      if (session.publicUrl) {
+        metadata.publicUrl = session.publicUrl;
+      }
+    }
+    if (session?.isGcs && config.gcsBucketName) {
+      metadata.gcsUri = `gs://${config.gcsBucketName}/raw/${params.sessionId}${ext}`;
+    }
+    return metadata;
+  }
+
+  /**
+   * Append binary chunk to resumable upload session (legacy fallback).
    */
   static async appendChunk(
     sessionId: string,
@@ -272,5 +452,50 @@ export class VideoStorageService {
         console.error('Failed to delete video file:', err);
       }
     }
+  }
+
+  /**
+   * Automatically deletes each video from Supabase Storage and local disk after it is posted.
+   */
+  static async deleteVideoAfterPosting(video: VideoMetadata): Promise<void> {
+    console.log(`[VideoStorage] Automatically cleaning up posted video ${video.id}...`);
+
+    // 1. Delete from Supabase Storage public bucket
+    if (video.supabasePath) {
+      await SupabaseService.deleteFile(video.supabasePath);
+    }
+
+    // 2. Delete primary local file
+    if (video.storagePath && fs.existsSync(video.storagePath)) {
+      try {
+        fs.unlinkSync(video.storagePath);
+        console.log(`[VideoStorage] Deleted local master: ${video.storagePath}`);
+      } catch (e: any) {
+        console.warn('[VideoStorage] Error unlinking local file:', e.message);
+      }
+    }
+
+    // 3. Delete converted file if distinct
+    if (video.convertedPath && fs.existsSync(video.convertedPath)) {
+      try {
+        fs.unlinkSync(video.convertedPath);
+        console.log(`[VideoStorage] Deleted local converted: ${video.convertedPath}`);
+      } catch (e: any) {}
+    }
+
+    // 4. Remove any derivative formatted files
+    try {
+      const files = fs.readdirSync(config.uploadDir);
+      files.forEach((file) => {
+        if (file.startsWith(video.id)) {
+          const fullPath = path.join(config.uploadDir, file);
+          try {
+            fs.unlinkSync(fullPath);
+          } catch (e) {}
+        }
+      });
+    } catch (e) {}
+
+    console.log(`[VideoStorage] Cleaned up video ${video.id} from Supabase and local storage.`);
   }
 }

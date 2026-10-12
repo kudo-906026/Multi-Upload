@@ -13,115 +13,196 @@ import {
   VideoFormatSettings,
   PlatformFormatSettings,
   NicheTrendReport,
+  SmartKeywordsResult,
 } from '@shared/types';
 
 const BASE_URL = '/api';
 
+/**
+ * Robust fetch wrapper that always checks response.ok and Content-Type before parsing JSON.
+ * Throws clean, informative error messages if the server returns HTML (e.g. 404/500 proxy error)
+ * preventing "Unexpected token '<', "<!DOCTYPE "... is not valid JSON".
+ */
+async function safeFetch<T = any>(
+  url: string,
+  options?: RequestInit
+): Promise<ApiResponse<T>> {
+  let res: Response;
+  try {
+    res = await fetch(url, options);
+  } catch (netErr: any) {
+    throw new Error(`Network error connecting to ${url}: ${netErr.message || 'Server unreachable'}`);
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+
+  // Validate that the server returned JSON
+  if (!contentType.includes('application/json')) {
+    const rawText = await res.text();
+    const preview = rawText.slice(0, 160).replace(/\s+/g, ' ').trim();
+    if (!res.ok) {
+      throw new Error(
+        `Server error HTTP ${res.status} (${res.statusText || 'Error'}), expected JSON but got ${
+          contentType || 'non-JSON'
+        }: "${preview}"`
+      );
+    }
+    throw new Error(
+      `Invalid server response: expected JSON but received ${contentType || 'non-JSON'} (HTTP ${
+        res.status
+      }): "${preview}"`
+    );
+  }
+
+  let json: ApiResponse<T>;
+  try {
+    json = await res.json();
+  } catch (parseErr: any) {
+    throw new Error(`Failed to parse JSON response (HTTP ${res.status}): ${parseErr.message}`);
+  }
+
+  if (!res.ok || json.success === false) {
+    const message = json.error || json.message || `Request failed with HTTP status ${res.status}`;
+    throw new Error(message);
+  }
+
+  return json;
+}
+
+/**
+ * Uploads a file directly to a signed storage URL using raw PUT with live progress tracking.
+ * For Supabase Storage and cloud hosts, this sends the file directly to storage so the server
+ * never receives the video file, avoiding bandwidth and memory limits.
+ */
+function uploadFileDirectly(
+  uploadUrl: string,
+  file: File,
+  onProgress?: (percent: number, stage: string) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl, true);
+    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        const percent = Math.min(99, Math.round((event.loaded / event.total) * 95));
+        const uploadedMB = (event.loaded / (1024 * 1024)).toFixed(1);
+        const totalMB = (event.total / (1024 * 1024)).toFixed(1);
+        onProgress(percent, `Uploading directly to storage: ${uploadedMB}MB / ${totalMB}MB (${percent}%)...`);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (onProgress) onProgress(98, 'Direct storage upload complete! Finalizing...');
+        resolve();
+      } else {
+        const preview = (xhr.responseText || '').slice(0, 150);
+        reject(new Error(`Direct storage upload failed with HTTP status ${xhr.status}: ${preview}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Network error during direct video storage upload. Please check connectivity and retry.'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Direct storage upload timed out. Please retry.'));
+    };
+
+    xhr.send(file);
+  });
+}
+
 export class ApiClient {
   static async getAuthStatus(): Promise<PlatformAuthStatus> {
-    const res = await fetch(`${BASE_URL}/auth/status`);
-    const json: ApiResponse<PlatformAuthStatus> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch auth status');
-    return json.data;
+    const res = await safeFetch<PlatformAuthStatus>(`${BASE_URL}/auth/status`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch auth status');
+    return res.data;
   }
 
   static async getAccounts(platform?: Platform): Promise<ConnectedAccount[]> {
     const url = platform ? `${BASE_URL}/accounts?platform=${platform}` : `${BASE_URL}/accounts`;
-    const res = await fetch(url);
-    const json: ApiResponse<ConnectedAccount[]> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch accounts');
-    return json.data;
+    const res = await safeFetch<ConnectedAccount[]>(url);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch accounts');
+    return res.data;
   }
 
   static async disconnectAccount(id: string): Promise<void> {
-    const res = await fetch(`${BASE_URL}/accounts/${id}`, { method: 'DELETE' });
-    const json: ApiResponse<void> = await res.json();
-    if (!json.success) throw new Error(json.error || 'Failed to disconnect account');
+    await safeFetch<void>(`${BASE_URL}/accounts/${id}`, { method: 'DELETE' });
   }
 
   static async setDefaultAccount(id: string): Promise<void> {
-    const res = await fetch(`${BASE_URL}/accounts/${id}/default`, { method: 'POST' });
-    const json: ApiResponse<void> = await res.json();
-    if (!json.success) throw new Error(json.error || 'Failed to set default account');
+    await safeFetch<void>(`${BASE_URL}/accounts/${id}/default`, { method: 'POST' });
   }
 
   static async getYouTubeAuthUrl(): Promise<string> {
-    const res = await fetch(`${BASE_URL}/auth/youtube/url`);
-    const json: ApiResponse<{ url: string }> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to get YouTube auth URL');
-    return json.data.url;
+    const res = await safeFetch<{ url: string }>(`${BASE_URL}/auth/youtube/url`);
+    if (!res.data) throw new Error(res.error || 'Failed to get YouTube auth URL');
+    return res.data.url;
   }
 
   static async exchangeYouTubeCode(code: string): Promise<ConnectedAccount> {
-    const res = await fetch(`${BASE_URL}/auth/youtube/callback`, {
+    const res = await safeFetch<ConnectedAccount>(`${BASE_URL}/auth/youtube/callback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
     });
-    const json: ApiResponse<ConnectedAccount> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to connect YouTube account');
-    return json.data;
+    if (!res.data) throw new Error(res.error || 'Failed to connect YouTube account');
+    return res.data;
   }
 
   static async getInstagramAuthUrl(): Promise<string> {
-    const res = await fetch(`${BASE_URL}/auth/instagram/url`);
-    const json: ApiResponse<{ url: string }> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to get Instagram auth URL');
-    return json.data.url;
+    const res = await safeFetch<{ url: string }>(`${BASE_URL}/auth/instagram/url`);
+    if (!res.data) throw new Error(res.error || 'Failed to get Instagram auth URL');
+    return res.data.url;
   }
 
   static async exchangeInstagramCode(code: string): Promise<ConnectedAccount> {
-    const res = await fetch(`${BASE_URL}/auth/instagram/callback`, {
+    const res = await safeFetch<ConnectedAccount>(`${BASE_URL}/auth/instagram/callback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
     });
-    const json: ApiResponse<ConnectedAccount> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to connect Instagram account');
-    return json.data;
+    if (!res.data) throw new Error(res.error || 'Failed to connect Instagram account');
+    return res.data;
   }
 
   static async refreshInstagramAccount(id: string): Promise<{ daysRemaining: number }> {
-    const res = await fetch(`${BASE_URL}/auth/instagram/${id}/refresh`, { method: 'POST' });
-    const json: ApiResponse<{ daysRemaining: number }> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to refresh Instagram token');
-    return json.data;
+    const res = await safeFetch<{ daysRemaining: number }>(`${BASE_URL}/auth/instagram/${id}/refresh`, {
+      method: 'POST',
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to refresh Instagram account token');
+    return res.data;
   }
 
   static async refreshInstagramToken(id?: string): Promise<{ daysRemaining: number }> {
     const url = id ? `${BASE_URL}/auth/instagram/${id}/refresh` : `${BASE_URL}/auth/instagram/refresh`;
-    const res = await fetch(url, { method: 'POST' });
-    const json: ApiResponse<{ daysRemaining: number }> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to refresh Instagram token');
-    return json.data;
+    const res = await safeFetch<{ daysRemaining: number }>(url, { method: 'POST' });
+    if (!res.data) throw new Error(res.error || 'Failed to refresh Instagram token');
+    return res.data;
   }
 
+  /**
+   * Resumable direct-to-storage video upload supporting up to 1 GB.
+   * Uploads directly to Supabase Storage (public bucket) via signed upload URLs.
+   * The backend server NEVER receives the video file directly, saving bandwidth and memory.
+   */
   static async uploadVideo(
     file: File,
     onProgress?: (percent: number, stage: string) => void
   ): Promise<VideoMetadata> {
-    // If file is smaller than 20MB, direct upload is fastest
-    if (file.size <= 20 * 1024 * 1024) {
-      if (onProgress) onProgress(30, 'Uploading video master...');
-      const formData = new FormData();
-      formData.append('video', file);
+    if (onProgress) onProgress(5, 'Requesting signed resumable upload URL...');
 
-      const res = await fetch(`${BASE_URL}/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      const json: ApiResponse<VideoMetadata> = await res.json();
-      if (!json.success || !json.data) throw new Error(json.error || 'Failed to upload video');
-      if (onProgress) onProgress(100, 'Upload complete!');
-      return json.data;
-    }
-
-    // For files > 20MB up to 1GB: Use 10MB chunked resumable upload
-    // defeating Cloud Run's 32MB request body ceiling
-    if (onProgress) onProgress(5, 'Initializing 1GB resumable upload session...');
-
-    const initRes = await fetch(`${BASE_URL}/upload/resumable/init`, {
+    // 1. Initialize signed resumable session
+    const initRes = await safeFetch<{
+      sessionId: string;
+      uploadUrl: string;
+      isSupabase?: boolean;
+      gcsUploadUrl?: string;
+      isGcs?: boolean;
+    }>(`${BASE_URL}/upload/resumable/init`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -131,90 +212,55 @@ export class ApiClient {
       }),
     });
 
-    const initJson: ApiResponse<{ sessionId: string; gcsUploadUrl?: string; chunkSize: number }> =
-      await initRes.json();
-    if (!initJson.success || !initJson.data) {
-      throw new Error(initJson.error || 'Failed to initialize upload session');
+    if (!initRes.data || !initRes.data.uploadUrl) {
+      throw new Error(initRes.error || 'Failed to acquire upload URL');
     }
 
-    const { sessionId, gcsUploadUrl, chunkSize = 10 * 1024 * 1024 } = initJson.data;
+    const { sessionId, uploadUrl, isSupabase, isGcs } = initRes.data;
 
-    // Direct GCS upload if signed resumable session URL is provided
-    if (gcsUploadUrl) {
-      if (onProgress) onProgress(15, 'Uploading directly to Google Cloud Storage...');
-      const gcsRes = await fetch(gcsUploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'video/mp4' },
-        body: file,
-      });
-      if (!gcsRes.ok) throw new Error(`Google Cloud Storage upload failed with status ${gcsRes.status}`);
+    if (onProgress) {
+      onProgress(
+        10,
+        isSupabase
+          ? 'Uploading directly to Supabase Storage (signed URL)...'
+          : isGcs
+          ? 'Uploading directly to cloud storage...'
+          : 'Uploading directly to storage...'
+      );
+    }
 
-      // Finalize on backend
-      const finishRes = await fetch(`${BASE_URL}/upload/resumable/chunk`, {
+    // 2. Direct upload via PUT to signed URL (server never receives file bytes)
+    await uploadFileDirectly(uploadUrl, file, onProgress);
+
+    // 3. Finalize upload session on backend
+    if (onProgress) onProgress(98, 'Finalizing video metadata and probing media...');
+
+    const finishRes = await safeFetch<{ isComplete: boolean; video: VideoMetadata }>(
+      `${BASE_URL}/upload/resumable/finish`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, isLastChunk: true }),
-      });
-      const finishJson: ApiResponse<{ isComplete: boolean; video: VideoMetadata }> = await finishRes.json();
-      if (!finishJson.success || !finishJson.data?.video) {
-        throw new Error(finishJson.error || 'Failed to finalize GCS upload');
+        body: JSON.stringify({
+          sessionId,
+          originalName: file.name,
+          totalSize: file.size,
+          mimeType: file.type || 'video/mp4',
+        }),
       }
-      if (onProgress) onProgress(100, 'Upload complete!');
-      return finishJson.data.video;
+    );
+
+    if (!finishRes.data?.video) {
+      throw new Error(finishRes.error || 'Failed to finalize uploaded video record');
     }
 
-    // Backend Chunked Stream (10MB chunks, Cloud Run safe)
-    const totalChunks = Math.ceil(file.size / chunkSize);
-    let uploadedBytes = 0;
-    let finalVideo: VideoMetadata | null = null;
-
-    for (let i = 0; i < totalChunks; i++) {
-      const start = i * chunkSize;
-      const end = Math.min(file.size, start + chunkSize);
-      const chunkBlob = file.slice(start, end);
-      const isLastChunk = i === totalChunks - 1;
-
-      const chunkFormData = new FormData();
-      chunkFormData.append('sessionId', sessionId);
-      chunkFormData.append('isLastChunk', String(isLastChunk));
-      chunkFormData.append('chunk', chunkBlob, file.name);
-
-      const chunkRes = await fetch(`${BASE_URL}/upload/resumable/chunk`, {
-        method: 'POST',
-        body: chunkFormData,
-      });
-
-      const chunkJson: ApiResponse<{ receivedBytes: number; isComplete: boolean; video?: VideoMetadata }> =
-        await chunkRes.json();
-
-      if (!chunkJson.success) {
-        throw new Error(chunkJson.error || `Chunk ${i + 1}/${totalChunks} upload failed`);
-      }
-
-      uploadedBytes += chunkBlob.size;
-      const percent = Math.min(99, Math.round((uploadedBytes / file.size) * 95));
-      if (onProgress) {
-        onProgress(percent, `Uploading chunk ${i + 1} of ${totalChunks} (${(uploadedBytes / 1024 / 1024).toFixed(1)}MB / ${(file.size / 1024 / 1024).toFixed(1)}MB)...`);
-      }
-
-      if (chunkJson.data?.video) {
-        finalVideo = chunkJson.data.video;
-      }
-    }
-
-    if (!finalVideo) {
-      throw new Error('Upload finished but video record was not returned.');
-    }
-
-    if (onProgress) onProgress(100, 'Upload complete! Probing media details...');
-    return finalVideo;
+    if (onProgress) onProgress(100, 'Upload complete!');
+    return finishRes.data.video;
   }
 
   static async getConversionStatus(videoId: string): Promise<ConversionProgress> {
-    const res = await fetch(`${BASE_URL}/conversion/${videoId}`);
-    const json: ApiResponse<ConversionProgress> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch conversion status');
-    return json.data;
+    const res = await safeFetch<ConversionProgress>(`${BASE_URL}/conversion/${videoId}`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch conversion status');
+    return res.data;
   }
 
   static async formatVideo(params: {
@@ -223,15 +269,13 @@ export class ApiClient {
     platformFormats?: PlatformFormatSettings;
     originalPath?: string;
   }): Promise<VideoMetadata> {
-    const res = await fetch(`${BASE_URL}/video/${params.videoId}/format`, {
+    const res = await safeFetch<VideoMetadata>(`${BASE_URL}/video/${params.videoId}/format`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-
-    const json: ApiResponse<VideoMetadata> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to adjust video format');
-    return json.data;
+    if (!res.data) throw new Error(res.error || 'Failed to adjust video format');
+    return res.data;
   }
 
   static async getTrends(params?: {
@@ -244,10 +288,9 @@ export class ApiClient {
     if (params?.region) query.set('region', params.region);
     if (params?.refresh) query.set('refresh', 'true');
 
-    const res = await fetch(`${BASE_URL}/trends?${query.toString()}`);
-    const json: ApiResponse<NicheTrendReport> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch trends');
-    return json.data;
+    const res = await safeFetch<NicheTrendReport>(`${BASE_URL}/trends?${query.toString()}`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch trends');
+    return res.data;
   }
 
   static async analyzeVideo(params: {
@@ -256,49 +299,60 @@ export class ApiClient {
     descriptionHint?: string;
     tone?: string;
   }): Promise<AIAnalysisResult> {
-    const res = await fetch(`${BASE_URL}/analyze`, {
+    const res = await safeFetch<AIAnalysisResult>(`${BASE_URL}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
+    if (!res.data) throw new Error(res.error || 'Failed to analyze video');
+    return res.data;
+  }
 
-    const json: ApiResponse<AIAnalysisResult> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to analyze video');
-    return json.data;
+  static async generateSmartKeywords(params: {
+    title?: string;
+    description?: string;
+    topic?: string;
+    videoFilename?: string;
+  }): Promise<SmartKeywordsResult> {
+    const res = await safeFetch<SmartKeywordsResult>(`${BASE_URL}/smart-keywords`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to generate smart keywords');
+    return res.data;
   }
 
   static async getPresets(): Promise<PlatformPreset[]> {
-    const res = await fetch(`${BASE_URL}/presets`);
-    const json: ApiResponse<PlatformPreset[]> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch presets');
-    return json.data;
+    const res = await safeFetch<PlatformPreset[]>(`${BASE_URL}/presets`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch presets');
+    return res.data;
   }
 
   static async savePreset(preset: Partial<PlatformPreset> & { platform: Platform }): Promise<PlatformPreset> {
-    const res = await fetch(`${BASE_URL}/presets`, {
+    const res = await safeFetch<PlatformPreset>(`${BASE_URL}/presets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(preset),
     });
-
-    const json: ApiResponse<PlatformPreset> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to save preset');
-    return json.data;
+    if (!res.data) throw new Error(res.error || 'Failed to save preset');
+    return res.data;
   }
 
   static async mergePreset(
     aiOutput: AIAnalysisResult,
     platform: Platform
   ): Promise<{ youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload }> {
-    const res = await fetch(`${BASE_URL}/presets/merge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aiOutput, platform }),
-    });
-
-    const json: ApiResponse<{ youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload }> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to merge preset');
-    return json.data;
+    const res = await safeFetch<{ youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload }>(
+      `${BASE_URL}/presets/merge`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aiOutput, platform }),
+      }
+    );
+    if (!res.data) throw new Error(res.error || 'Failed to merge preset');
+    return res.data;
   }
 
   static async publishJob(payload: {
@@ -311,38 +365,32 @@ export class ApiClient {
     youtubePayload?: YouTubePublishPayload;
     instagramPayload?: InstagramPublishPayload;
   }): Promise<PublishJob> {
-    const res = await fetch(`${BASE_URL}/publish`, {
+    const res = await safeFetch<PublishJob>(`${BASE_URL}/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-
-    const json: ApiResponse<PublishJob> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to initiate publish job');
-    return json.data;
+    if (!res.data) throw new Error(res.error || 'Failed to initiate publish job');
+    return res.data;
   }
 
   static async getJobs(): Promise<PublishJob[]> {
-    const res = await fetch(`${BASE_URL}/jobs`);
-    const json: ApiResponse<PublishJob[]> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch jobs');
-    return json.data;
+    const res = await safeFetch<PublishJob[]>(`${BASE_URL}/jobs`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch jobs');
+    return res.data;
   }
 
   static async getJob(id: string): Promise<PublishJob> {
-    const res = await fetch(`${BASE_URL}/jobs/${id}`);
-    const json: ApiResponse<PublishJob> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to fetch job');
-    return json.data;
+    const res = await safeFetch<PublishJob>(`${BASE_URL}/jobs/${id}`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch job');
+    return res.data;
   }
 
   static async retryJobPlatform(jobId: string, platform: Platform): Promise<PublishJob> {
-    const res = await fetch(`${BASE_URL}/jobs/${jobId}/retry/${platform}`, {
+    const res = await safeFetch<PublishJob>(`${BASE_URL}/jobs/${jobId}/retry/${platform}`, {
       method: 'POST',
     });
-
-    const json: ApiResponse<PublishJob> = await res.json();
-    if (!json.success || !json.data) throw new Error(json.error || 'Failed to retry platform');
-    return json.data;
+    if (!res.data) throw new Error(res.error || 'Failed to retry platform');
+    return res.data;
   }
 }

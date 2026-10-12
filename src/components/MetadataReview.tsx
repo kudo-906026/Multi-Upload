@@ -16,6 +16,8 @@ import {
   MessageCircle,
   Share2,
   Music,
+  RefreshCw,
+  Copy,
 } from 'lucide-react';
 import {
   Platform,
@@ -99,6 +101,14 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
   const [igHashtags, setIgHashtags] = useState<string[]>([]);
   const [newIgHashtag, setNewIgHashtag] = useState('');
   const [igShareToFeed, setIgShareToFeed] = useState(true);
+  const [igAltText, setIgAltText] = useState('');
+
+  // Smart Keyword state
+  const [smartKeywordQuery, setSmartKeywordQuery] = useState('');
+  const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
+  const [smartKeywordsFeedback, setSmartKeywordsFeedback] = useState<string | null>(null);
+  const [generatedPrimaryKeywords, setGeneratedPrimaryKeywords] = useState<string[]>([]);
+  const [copiedAltText, setCopiedAltText] = useState(false);
 
   // Preset feedback state
   const [presetAppliedMsg, setPresetAppliedMsg] = useState<string | null>(null);
@@ -115,6 +125,12 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
       if (aiResult.instagram) {
         setIgCaption(aiResult.instagram.caption || '');
         setIgHashtags(aiResult.instagram.hashtags || []);
+        if (aiResult.instagram.altText) {
+          setIgAltText(aiResult.instagram.altText);
+        }
+      }
+      if (aiResult.topic && !smartKeywordQuery) {
+        setSmartKeywordQuery(aiResult.topic);
       }
     }
   }, [aiResult]);
@@ -261,6 +277,51 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
     setIgHashtags(igHashtags.filter((h) => h !== hashToRemove));
   };
 
+  const handleGenerateSmartKeywords = async () => {
+    try {
+      setIsGeneratingKeywords(true);
+      setSmartKeywordsFeedback(null);
+      const query = smartKeywordQuery || ytTitle || trendContext?.topic || aiResult?.topic || '';
+      const result = await ApiClient.generateSmartKeywords({
+        title: ytTitle || aiResult?.youtube?.title,
+        description: ytDescription || igCaption,
+        topic: query,
+      });
+
+      if (result.youtubeTags && result.youtubeTags.length > 0) {
+        setYtTags((prev) => {
+          const existing = new Set(prev.map((t) => t.toLowerCase()));
+          const toAdd = result.youtubeTags.filter((t) => !existing.has(t.toLowerCase()));
+          return [...prev, ...toAdd];
+        });
+      }
+
+      if (result.instagramAltText) {
+        setIgAltText(result.instagramAltText);
+      }
+
+      if (result.primaryKeywords) {
+        setGeneratedPrimaryKeywords(result.primaryKeywords);
+      }
+
+      setSmartKeywordsFeedback(
+        `Generated ${result.youtubeTags?.length || 0} YouTube SEO tags and Instagram Alt-Text description!`
+      );
+    } catch (err: any) {
+      setSmartKeywordsFeedback(`Generation error: ${err.message || 'Failed'}`);
+    } finally {
+      setIsGeneratingKeywords(false);
+    }
+  };
+
+  const handleCopyAltText = () => {
+    if (igAltText) {
+      navigator.clipboard.writeText(igAltText);
+      setCopiedAltText(true);
+      setTimeout(() => setCopiedAltText(false), 2000);
+    }
+  };
+
   const handlePublishClick = () => {
     const payloads: {
       youtubePayload?: YouTubePublishPayload;
@@ -283,6 +344,7 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
         caption: igCaption,
         hashtags: igHashtags,
         shareToFeed: igShareToFeed,
+        altText: igAltText || undefined,
       };
     }
 
@@ -364,6 +426,83 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Form Fields: 7 Columns */}
         <div className="lg:col-span-7 space-y-5">
+          {/* Smart Keyword & SEO Engine (Gemini Grounded SEO Tags & Instagram Alt-Text) */}
+          <div className="bg-gradient-to-r from-indigo-950/70 via-slate-900 to-purple-950/50 p-4 rounded-xl border border-indigo-500/40 shadow-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 rounded-lg bg-indigo-600/30 text-indigo-300 border border-indigo-500/30">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>Smart Keyword & SEO Studio</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">Gemini Grounded</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Analyzes video content to generate SEO-friendly YouTube tags & Instagram alt-text automatically
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={smartKeywordQuery}
+                  onChange={(e) => setSmartKeywordQuery(e.target.value)}
+                  placeholder="Enter video topic or focus keyword (e.g. AI tools, fitness tips)..."
+                  className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateSmartKeywords}
+                disabled={isGeneratingKeywords}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs transition-all flex items-center justify-center space-x-1.5 shrink-0 shadow-md active:scale-95"
+              >
+                {isGeneratingKeywords ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Generate Smart Keywords</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {smartKeywordsFeedback && (
+              <div className="text-[11px] px-2.5 py-1.5 rounded-lg bg-indigo-900/40 border border-indigo-700/50 text-indigo-200 flex items-center justify-between animate-fade-in">
+                <span>{smartKeywordsFeedback}</span>
+                <button
+                  type="button"
+                  onClick={() => setSmartKeywordsFeedback(null)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+
+            {generatedPrimaryKeywords.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[10px] text-slate-400 font-medium">Keywords:</span>
+                {generatedPrimaryKeywords.map((kw) => (
+                  <span
+                    key={kw}
+                    className="px-2 py-0.5 rounded-md text-[10px] bg-slate-800/80 text-indigo-300 border border-indigo-500/30"
+                  >
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Preset Quick Actions */}
           <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800/80">
             <div className="flex items-center space-x-2 text-xs text-slate-300">
@@ -752,6 +891,49 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
                     className="bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none px-2 py-1 flex-1 min-w-[120px]"
                   />
                 </div>
+              </div>
+
+              {/* Instagram SEO Alt-Text Description */}
+              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                    <span>Instagram SEO Alt-Text Description</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-950/60 text-pink-300 border border-pink-800/40 font-medium">
+                      Accessibility & Ranking
+                    </span>
+                  </label>
+                  {igAltText && (
+                    <button
+                      type="button"
+                      onClick={handleCopyAltText}
+                      className="flex items-center space-x-1 text-[11px] text-pink-400 hover:text-pink-300 font-semibold transition-colors"
+                      title="Copy alt-text to clipboard"
+                    >
+                      {copiedAltText ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span className="text-emerald-400">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy Alt-Text</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                <textarea
+                  rows={3}
+                  value={igAltText}
+                  onChange={(e) => setIgAltText(e.target.value)}
+                  placeholder="Detailed visual description with keywords to help screen readers and help the Instagram algorithm index this Reel..."
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition-all leading-relaxed"
+                />
+                <p className="text-[11px] text-slate-400">
+                  Screen-reader accessible description with natural keywords to boost search discovery on Instagram Explore.
+                </p>
               </div>
 
               {/* Share to feed toggle */}

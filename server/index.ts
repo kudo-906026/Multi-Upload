@@ -8,6 +8,7 @@ import apiRoutes from './routes/api.js';
 import { AccountStorageService } from './services/accountStorage.js';
 import { InstagramService } from './services/instagramService.js';
 import { JobQueueService } from './services/jobQueue.js';
+import { VideoStorageService } from './storage/videoStorage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,8 +55,21 @@ async function startServer() {
     });
   });
 
+  // Direct raw stream upload endpoint for preview environment (bypasses /api & body parsers)
+  app.put('/storage/direct-upload/:sessionId', (req, res) => {
+    VideoStorageService.handleDirectStreamUpload(req, res);
+  });
+
   // API Routes
   app.use('/api', apiRoutes);
+
+  // Guaranteed JSON 404 for any /api route: NEVER fall through to Vite SPA or static HTML handlers
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `API route not found: ${req.method} ${req.originalUrl}`,
+    });
+  });
 
   // Development vs Production Frontend Serving
   const isProduction = process.env.NODE_ENV === 'production';

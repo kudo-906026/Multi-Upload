@@ -11,6 +11,7 @@ import {
 } from '../../shared/types.js';
 import { YouTubeService } from './youtubeService.js';
 import { InstagramService } from './instagramService.js';
+import { VideoStorageService } from '../storage/videoStorage.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
@@ -149,6 +150,7 @@ export class JobQueueService {
     if (currentJob) {
       const results = Object.values(currentJob.platformResults).filter(Boolean) as PlatformJobResult[];
       const allPublished = results.every((r) => r.status === 'published');
+      const anyPublished = results.some((r) => r.status === 'published');
       const allFailed = results.every((r) => r.status === 'failed');
       const anyFailed = results.some((r) => r.status === 'failed');
 
@@ -164,6 +166,15 @@ export class JobQueueService {
 
       currentJob.completedAt = new Date().toISOString();
       this.persist();
+
+      // Automatically delete the uploaded video from Supabase Storage and local disk after it is posted!
+      if (anyPublished || allPublished) {
+        try {
+          await VideoStorageService.deleteVideoAfterPosting(currentJob.video);
+        } catch (cleanupErr: any) {
+          console.warn('[JobQueue] Error during automatic cleanup of posted video:', cleanupErr.message);
+        }
+      }
     }
   }
 

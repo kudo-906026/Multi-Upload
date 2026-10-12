@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { ConnectedAccount, Platform } from '../../shared/types.js';
 import { config } from '../config.js';
+import { SupabaseService } from './supabaseService.js';
 
 interface EncryptedPayload {
   iv: string;
@@ -44,7 +45,7 @@ export class AccountStorageService {
   private static accounts: Map<string, StoredAccountRecord> = new Map();
   private static encryptionKeyBuffer: Buffer;
 
-  static init(): void {
+  static async init(): Promise<void> {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
@@ -52,16 +53,62 @@ export class AccountStorageService {
     // Initialize or derive 32-byte encryption key
     this.encryptionKeyBuffer = this.resolveKey();
 
-    // Load stored accounts
+    // Load locally stored accounts first (fallback / cache)
     if (fs.existsSync(ACCOUNTS_FILE)) {
       try {
         const raw = fs.readFileSync(ACCOUNTS_FILE, 'utf-8');
         const list: StoredAccountRecord[] = JSON.parse(raw);
         list.forEach((rec) => this.accounts.set(rec.id, rec));
-        console.log(`[AccountStorage] Loaded ${this.accounts.size} connected accounts.`);
+        console.log(`[AccountStorage] Loaded ${this.accounts.size} cached connected accounts.`);
       } catch (err) {
         console.warn('[AccountStorage] Failed to parse accounts file, starting fresh:', err);
       }
+    }
+
+    // Asynchronously sync from Supabase cloud database
+    await this.syncFromSupabase();
+  }
+
+  /**
+   * Loads connected accounts and encrypted tokens from Supabase table.
+   */
+  static async syncFromSupabase(): Promise<void> {
+    if (!SupabaseService.isConfigured()) return;
+    const client = SupabaseService.getClient();
+    if (!client) return;
+
+    try {
+      const { data, error } = await client.from('connected_accounts').select('*');
+      if (error) {
+        console.warn('[AccountStorage] Supabase table query notice:', error.message);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        data.forEach((row: any) => {
+          const encryptedTokens =
+            typeof row.encrypted_tokens === 'string'
+              ? JSON.parse(row.encrypted_tokens)
+              : row.encrypted_tokens;
+
+          this.accounts.set(row.id, {
+            id: row.id,
+            platform: row.platform,
+            name: row.name,
+            handle: row.handle || undefined,
+            avatarUrl: row.avatar_url || undefined,
+            platformAccountId: row.platform_account_id,
+            connectedAt: row.connected_at,
+            expiresAt: row.expires_at || undefined,
+            isDefault: Boolean(row.is_default),
+            encryptedTokens,
+          });
+        });
+        console.log(`[AccountStorage] Synced ${data.length} accounts from Supabase cloud database.`);
+        this.persistLocal();
+      }
+    } catch (err: any) {
+      console.warn('[AccountStorage] Supabase sync error:', err.message);
     }
   }
 
@@ -119,13 +166,58 @@ export class AccountStorageService {
     return JSON.parse(decrypted);
   }
 
-  private static persist(): void {
+  private static persistLocal(): void {
     try {
       const list = Array.from(this.accounts.values());
       fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
     } catch (err) {
-      console.error('[AccountStorage] Failed to persist accounts:', err);
+      console.error('[AccountStorage] Failed to persist accounts locally:', err);
     }
+  }
+
+  private static async persistToSupabase(record: StoredAccountRecord): Promise<void> {
+    if (!SupabaseService.isConfigured()) return;
+    const client = SupabaseService.getClient();
+    if (!client) return;
+
+    try {
+      const { error } = await client.from('connected_accounts').upsert({
+        id: record.id,
+        platform: record.platform,
+        name: record.name,
+        handle: record.handle || null,
+        avatar_url: record.avatarUrl || null,
+        platform_account_id: record.platformAccountId,
+        connected_at: record.connectedAt,
+        expires_at: record.expiresAt || null,
+        is_default: Boolean(record.isDefault),
+        encrypted_tokens: record.encryptedTokens,
+      });
+      if (error) {
+        console.warn('[AccountStorage] Supabase upsert notice:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[AccountStorage] Supabase persist error:', err.message);
+    }
+  }
+
+  private static async deleteFromSupabase(id: string): Promise<void> {
+    if (!SupabaseService.isConfigured()) return;
+    const client = SupabaseService.getClient();
+    if (!client) return;
+
+    try {
+      const { error } = await client.from('connected_accounts').delete().eq('id', id);
+      if (error) {
+        console.warn('[AccountStorage] Supabase delete notice:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[AccountStorage] Supabase delete error:', err.message);
+    }
+  }
+
+  private static persist(): void {
+    this.persistLocal();
   }
 
   /**
@@ -236,6 +328,7 @@ export class AccountStorageService {
 
     this.accounts.set(id, record);
     this.persist();
+    this.persistToSupabase(record).catch((e) => console.warn('[AccountStorage] Supabase save notice:', e));
 
     return this.toPublicAccount(record);
   }
@@ -252,6 +345,7 @@ export class AccountStorageService {
       record.expiresAt = newExpiresAt;
     }
     this.persist();
+    this.persistToSupabase(record).catch((e) => console.warn('[AccountStorage] Supabase update notice:', e));
     return true;
   }
 
@@ -259,6 +353,7 @@ export class AccountStorageService {
     const deleted = this.accounts.delete(id);
     if (deleted) {
       this.persist();
+      this.deleteFromSupabase(id).catch((e) => console.warn('[AccountStorage] Supabase delete notice:', e));
     }
     return deleted;
   }
@@ -271,6 +366,7 @@ export class AccountStorageService {
     this.accounts.forEach((acc) => {
       if (acc.platform === target.platform) {
         acc.isDefault = acc.id === id;
+        this.persistToSupabase(acc).catch((e) => console.warn('[AccountStorage] Supabase update default notice:', e));
       }
     });
 

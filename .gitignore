@@ -17,8 +17,10 @@ local.properties
 .env
 debug.keystore
 node_modules/
+dist/
 uploads/
 data/.secret_key
 data/accounts.json
 *.log
+*.tar.gz
 
