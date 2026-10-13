@@ -3,20 +3,21 @@ import { google } from 'googleapis';
 import { config } from '../config.js';
 import { YouTubePublishPayload, ConnectedAccount } from '../../shared/types.js';
 import { AccountStorageService, YouTubeTokens } from './accountStorage.js';
+import { OAuthStateService } from './oauthStateService.js';
 
 export class YouTubeService {
   /**
-   * Check if YouTube OAuth is configured and returns connected channels.
+   * Check if YouTube OAuth is configured and returns connected channels for the user.
    */
-  static getAuthStatus(): {
+  static async getAuthStatus(userId: string): Promise<{
     configured: boolean;
     authenticated: boolean;
     channelTitle?: string;
     needsReauth: boolean;
     accounts: ConnectedAccount[];
-  } {
+  }> {
     const configured = Boolean(config.google.clientId && config.google.clientSecret);
-    const accounts = AccountStorageService.getPublicAccounts('youtube');
+    const accounts = await AccountStorageService.getPublicAccounts(userId, 'youtube');
     const authenticated = accounts.length > 0;
     const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
 
@@ -30,9 +31,9 @@ export class YouTubeService {
   }
 
   /**
-   * Generates Google OAuth 2.0 consent URL for YouTube upload & readonly scopes.
+   * Generates Google OAuth 2.0 consent URL with signed state identifying the user.
    */
-  static getAuthUrl(customRedirectUri?: string): string {
+  static getAuthUrl(userId: string, customRedirectUri?: string): string {
     const redirectUri = customRedirectUri || config.google.redirectUri;
     const oauth2Client = new google.auth.OAuth2(
       config.google.clientId,
@@ -46,19 +47,26 @@ export class YouTubeService {
       'https://www.googleapis.com/auth/userinfo.profile',
     ];
 
+    // Cryptographically signed state identifying the user
+    const state = OAuthStateService.signState(userId, 'youtube');
+
     return oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
       prompt: 'consent',
       include_granted_scopes: true,
+      state,
     });
   }
 
   /**
-   * Exchanges authorization code for tokens, fetches YouTube channel details,
-   * and saves the connected account with encrypted tokens.
+   * Exchanges authorization code for tokens and saves to the user's account storage.
    */
-  static async handleCallback(code: string, customRedirectUri?: string): Promise<ConnectedAccount> {
+  static async handleCallback(
+    code: string,
+    userId: string,
+    customRedirectUri?: string
+  ): Promise<ConnectedAccount> {
     const redirectUri = customRedirectUri || config.google.redirectUri;
     const oauth2Client = new google.auth.OAuth2(
       config.google.clientId,
@@ -79,19 +87,22 @@ export class YouTubeService {
     const channelItem = channelRes.data.items?.[0];
     const channelId = channelItem?.id || `yt-${Date.now()}`;
     const channelTitle = channelItem?.snippet?.title || 'YouTube Channel';
-    const channelHandle = channelItem?.snippet?.customUrl || `@${channelTitle.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`;
+    const channelHandle =
+      channelItem?.snippet?.customUrl ||
+      `@${channelTitle.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`;
     const avatarUrl =
       channelItem?.snippet?.thumbnails?.high?.url ||
       channelItem?.snippet?.thumbnails?.medium?.url ||
       channelItem?.snippet?.thumbnails?.default?.url;
 
-    // Check if refresh token exists (Google only returns it on consent)
     const refreshToken = tokens.refresh_token || '';
     if (!refreshToken) {
-      console.warn('[YouTubeService] Notice: Google did not return a refresh_token in this exchange (prompt=consent ensures it).');
+      console.warn(
+        '[YouTubeService] Notice: Google did not return a refresh_token in this exchange (prompt=consent ensures it).'
+      );
     }
 
-    const savedAccount = AccountStorageService.saveAccount({
+    const savedAccount = await AccountStorageService.saveAccount(userId, {
       platform: 'youtube',
       platformAccountId: channelId,
       name: channelTitle,
@@ -104,29 +115,32 @@ export class YouTubeService {
       } as YouTubeTokens,
     });
 
-    console.log(`[YouTubeService] Successfully connected YouTube channel: "${channelTitle}" (${channelId})`);
+    console.log(
+      `[YouTubeService] Successfully connected YouTube channel: "${channelTitle}" (${channelId}) for user ${userId}`
+    );
     return savedAccount;
   }
 
   /**
-   * Uploads vertical video to YouTube Shorts using the specific or default connected account.
+   * Uploads vertical video to YouTube Shorts using the specific or default connected account for the user.
    */
   static async uploadVideo(
     storagePath: string,
     payload: YouTubePublishPayload,
     onProgress: (progress: number, stage: string) => void,
+    userId: string,
     accountId?: string
   ): Promise<{ videoId: string; url: string }> {
     onProgress(5, 'Authenticating YouTube channel credentials...');
 
-    // Fetch account with decrypted tokens
+    // Fetch user's account with decrypted tokens
     const creds = accountId
-      ? AccountStorageService.getAccountTokens<YouTubeTokens>(accountId)
-      : AccountStorageService.getDefaultAccountTokens<YouTubeTokens>('youtube');
+      ? AccountStorageService.getAccountTokens<YouTubeTokens>(userId, accountId)
+      : AccountStorageService.getDefaultAccountTokens<YouTubeTokens>(userId, 'youtube');
 
     if (!creds || !creds.tokens.refreshToken) {
       throw new Error(
-        'No connected YouTube channel found. Please connect your YouTube channel on the Accounts page first.'
+        'No connected YouTube channel found for your account. Please connect your YouTube channel on the Accounts page first.'
       );
     }
 

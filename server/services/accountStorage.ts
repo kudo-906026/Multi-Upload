@@ -13,6 +13,7 @@ interface EncryptedPayload {
 
 export interface StoredAccountRecord {
   id: string;
+  userId: string;
   platform: Platform;
   name: string;
   handle?: string;
@@ -42,6 +43,7 @@ const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const KEY_FILE = path.join(DATA_DIR, '.secret_key');
 
 export class AccountStorageService {
+  // Keyed by record.id
   private static accounts: Map<string, StoredAccountRecord> = new Map();
   private static encryptionKeyBuffer: Buffer;
 
@@ -53,38 +55,50 @@ export class AccountStorageService {
     // Initialize or derive 32-byte encryption key
     this.encryptionKeyBuffer = this.resolveKey();
 
-    // Load locally stored accounts first (fallback / cache)
+    // Load locally stored accounts as initial cache
     if (fs.existsSync(ACCOUNTS_FILE)) {
       try {
         const raw = fs.readFileSync(ACCOUNTS_FILE, 'utf-8');
         const list: StoredAccountRecord[] = JSON.parse(raw);
-        list.forEach((rec) => this.accounts.set(rec.id, rec));
+        list.forEach((rec) => {
+          if (rec.id && rec.userId) {
+            this.accounts.set(rec.id, rec);
+          }
+        });
         console.log(`[AccountStorage] Loaded ${this.accounts.size} cached connected accounts.`);
       } catch (err) {
-        console.warn('[AccountStorage] Failed to parse accounts file, starting fresh:', err);
+        console.warn('[AccountStorage] Failed to parse accounts file:', err);
       }
     }
-
-    // Asynchronously sync from Supabase cloud database
-    await this.syncFromSupabase();
   }
 
   /**
-   * Loads connected accounts and encrypted tokens from Supabase table.
+   * Syncs accounts for a specific user from Supabase.
    */
-  static async syncFromSupabase(): Promise<void> {
-    if (!SupabaseService.isConfigured()) return;
+  static async syncUserAccounts(userId: string): Promise<void> {
+    if (!SupabaseService.isConfigured() || !userId) return;
     const client = SupabaseService.getClient();
     if (!client) return;
 
     try {
-      const { data, error } = await client.from('connected_accounts').select('*');
+      const { data, error } = await client
+        .from('connected_accounts')
+        .select('*')
+        .eq('user_id', userId);
+
       if (error) {
-        console.warn('[AccountStorage] Supabase table query notice:', error.message);
+        console.warn(`[AccountStorage] Supabase accounts query notice for user ${userId}:`, error.message);
         return;
       }
 
-      if (data && data.length > 0) {
+      if (data) {
+        // Clear old memory records for this user and load fresh
+        for (const [id, rec] of this.accounts.entries()) {
+          if (rec.userId === userId) {
+            this.accounts.delete(id);
+          }
+        }
+
         data.forEach((row: any) => {
           const encryptedTokens =
             typeof row.encrypted_tokens === 'string'
@@ -93,6 +107,7 @@ export class AccountStorageService {
 
           this.accounts.set(row.id, {
             id: row.id,
+            userId: row.user_id,
             platform: row.platform,
             name: row.name,
             handle: row.handle || undefined,
@@ -104,7 +119,6 @@ export class AccountStorageService {
             encryptedTokens,
           });
         });
-        console.log(`[AccountStorage] Synced ${data.length} accounts from Supabase cloud database.`);
         this.persistLocal();
       }
     } catch (err: any) {
@@ -114,11 +128,9 @@ export class AccountStorageService {
 
   private static resolveKey(): Buffer {
     if (config.encryptionKey && config.encryptionKey.trim().length >= 16) {
-      // Deterministically expand to 32 bytes via SHA-256
       return crypto.createHash('sha256').update(config.encryptionKey.trim()).digest();
     }
 
-    // Persist a local machine key in data/.secret_key if no env var supplied
     if (fs.existsSync(KEY_FILE)) {
       try {
         const savedHex = fs.readFileSync(KEY_FILE, 'utf-8').trim();
@@ -142,7 +154,7 @@ export class AccountStorageService {
   private static encrypt(data: any): EncryptedPayload {
     const iv = crypto.randomBytes(12); // GCM standard 96-bit IV
     const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKeyBuffer, iv);
-    
+
     const plaintext = JSON.stringify(data);
     let ciphertext = cipher.update(plaintext, 'utf8', 'hex');
     ciphertext += cipher.final('hex');
@@ -183,6 +195,7 @@ export class AccountStorageService {
     try {
       const { error } = await client.from('connected_accounts').upsert({
         id: record.id,
+        user_id: record.userId,
         platform: record.platform,
         name: record.name,
         handle: record.handle || null,
@@ -201,23 +214,24 @@ export class AccountStorageService {
     }
   }
 
-  private static async deleteFromSupabase(id: string): Promise<void> {
+  private static async deleteFromSupabase(userId: string, id: string): Promise<void> {
     if (!SupabaseService.isConfigured()) return;
     const client = SupabaseService.getClient();
     if (!client) return;
 
     try {
-      const { error } = await client.from('connected_accounts').delete().eq('id', id);
+      const { error } = await client
+        .from('connected_accounts')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
+
       if (error) {
         console.warn('[AccountStorage] Supabase delete notice:', error.message);
       }
     } catch (err: any) {
       console.warn('[AccountStorage] Supabase delete error:', err.message);
     }
-  }
-
-  private static persist(): void {
-    this.persistLocal();
   }
 
   /**
@@ -237,6 +251,7 @@ export class AccountStorageService {
 
     return {
       id: record.id,
+      userId: record.userId,
       platform: record.platform,
       name: record.name,
       handle: record.handle,
@@ -250,25 +265,35 @@ export class AccountStorageService {
     };
   }
 
-  static getPublicAccounts(platform?: Platform): ConnectedAccount[] {
-    const list = Array.from(this.accounts.values());
+  /**
+   * Retrieves public accounts belonging strictly to the specified userId.
+   */
+  static async getPublicAccounts(userId: string, platform?: Platform): Promise<ConnectedAccount[]> {
+    await this.syncUserAccounts(userId);
+
+    const list = Array.from(this.accounts.values()).filter((a) => a.userId === userId);
     const filtered = platform ? list.filter((a) => a.platform === platform) : list;
     return filtered
       .map((r) => this.toPublicAccount(r))
       .sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
   }
 
-  static getPublicAccountById(id: string): ConnectedAccount | null {
+  static getPublicAccountById(userId: string, id: string): ConnectedAccount | null {
     const record = this.accounts.get(id);
-    return record ? this.toPublicAccount(record) : null;
+    if (!record || record.userId !== userId) return null;
+    return this.toPublicAccount(record);
   }
 
   /**
    * Retrieves and decrypts the tokens for server-side authenticated operations.
+   * Scoped to the specific user.
    */
-  static getAccountTokens<T = any>(id: string): { account: ConnectedAccount; tokens: T } | null {
+  static getAccountTokens<T = any>(
+    userId: string,
+    id: string
+  ): { account: ConnectedAccount; tokens: T } | null {
     const record = this.accounts.get(id);
-    if (!record) return null;
+    if (!record || record.userId !== userId) return null;
 
     try {
       const tokens = this.decrypt<T>(record.encryptedTokens);
@@ -283,38 +308,63 @@ export class AccountStorageService {
   }
 
   /**
-   * Returns the primary or default account for a given platform.
+   * Returns the primary or default account for a given platform and user.
    */
-  static getDefaultAccountTokens<T = any>(platform: Platform): { account: ConnectedAccount; tokens: T } | null {
-    const list = Array.from(this.accounts.values()).filter((a) => a.platform === platform);
+  static getDefaultAccountTokens<T = any>(
+    param1: string,
+    param2?: Platform
+  ): { account: ConnectedAccount; tokens: T } | null {
+    let list: StoredAccountRecord[];
+    let effectiveUserId: string;
+
+    if (param2) {
+      // Called as (userId, platform)
+      effectiveUserId = param1;
+      list = Array.from(this.accounts.values()).filter(
+        (a) => a.userId === param1 && a.platform === param2
+      );
+    } else {
+      // Called as (platform)
+      list = Array.from(this.accounts.values()).filter(
+        (a) => a.platform === (param1 as Platform)
+      );
+      if (list.length === 0) return null;
+      effectiveUserId = list[0].userId;
+    }
+
     if (list.length === 0) return null;
 
     const selected = list.find((a) => a.isDefault) || list[0];
-    return this.getAccountTokens<T>(selected.id);
+    return this.getAccountTokens<T>(selected.userId, selected.id);
   }
 
   /**
-   * Saves or updates a connected account with encrypted tokens.
+   * Saves or updates a connected account with encrypted tokens for a specific user.
    */
-  static saveAccount(params: {
-    platform: Platform;
-    name: string;
-    handle?: string;
-    avatarUrl?: string;
-    platformAccountId: string;
-    tokens: any;
-    expiresAt?: string;
-  }): ConnectedAccount {
-    // Check if account already exists with the same platformAccountId
-    const existing = Array.from(this.accounts.values()).find(
+  static async saveAccount(
+    userId: string,
+    params: {
+      platform: Platform;
+      name: string;
+      handle?: string;
+      avatarUrl?: string;
+      platformAccountId: string;
+      tokens: any;
+      expiresAt?: string;
+    }
+  ): Promise<ConnectedAccount> {
+    // Check if account already exists for this user with same platformAccountId
+    const userAccounts = Array.from(this.accounts.values()).filter((a) => a.userId === userId);
+    const existing = userAccounts.find(
       (a) => a.platform === params.platform && a.platformAccountId === params.platformAccountId
     );
 
     const id = existing ? existing.id : crypto.randomUUID();
-    const isFirstOfPlatform = Array.from(this.accounts.values()).filter((a) => a.platform === params.platform).length === 0;
+    const isFirstOfPlatform = userAccounts.filter((a) => a.platform === params.platform).length === 0;
 
     const record: StoredAccountRecord = {
       id,
+      userId,
       platform: params.platform,
       name: params.name,
       handle: params.handle,
@@ -327,50 +377,60 @@ export class AccountStorageService {
     };
 
     this.accounts.set(id, record);
-    this.persist();
-    this.persistToSupabase(record).catch((e) => console.warn('[AccountStorage] Supabase save notice:', e));
+    this.persistLocal();
+    await this.persistToSupabase(record);
 
     return this.toPublicAccount(record);
   }
 
   /**
-   * Updates tokens for an existing account (e.g. after Instagram refresh).
+   * Updates tokens for an existing account belonging to the user.
    */
-  static updateTokens(id: string, newTokens: any, newExpiresAt?: string): boolean {
+  static async updateTokens(
+    userId: string,
+    id: string,
+    newTokens: any,
+    newExpiresAt?: string
+  ): Promise<boolean> {
     const record = this.accounts.get(id);
-    if (!record) return false;
+    if (!record || record.userId !== userId) return false;
 
     record.encryptedTokens = this.encrypt(newTokens);
     if (newExpiresAt) {
       record.expiresAt = newExpiresAt;
     }
-    this.persist();
-    this.persistToSupabase(record).catch((e) => console.warn('[AccountStorage] Supabase update notice:', e));
+    this.persistLocal();
+    await this.persistToSupabase(record);
     return true;
   }
 
-  static removeAccount(id: string): boolean {
+  static async removeAccount(userId: string, id: string): Promise<boolean> {
+    const record = this.accounts.get(id);
+    if (!record || record.userId !== userId) return false;
+
     const deleted = this.accounts.delete(id);
     if (deleted) {
-      this.persist();
-      this.deleteFromSupabase(id).catch((e) => console.warn('[AccountStorage] Supabase delete notice:', e));
+      this.persistLocal();
+      await this.deleteFromSupabase(userId, id);
     }
     return deleted;
   }
 
-  static setDefault(id: string): boolean {
+  static async setDefault(userId: string, id: string): Promise<boolean> {
     const target = this.accounts.get(id);
-    if (!target) return false;
+    if (!target || target.userId !== userId) return false;
 
-    // Reset default for other accounts of the same platform
-    this.accounts.forEach((acc) => {
-      if (acc.platform === target.platform) {
+    // Reset default for other accounts of the same platform for this user
+    for (const acc of this.accounts.values()) {
+      if (acc.userId === userId && acc.platform === target.platform) {
         acc.isDefault = acc.id === id;
-        this.persistToSupabase(acc).catch((e) => console.warn('[AccountStorage] Supabase update default notice:', e));
+        this.persistToSupabase(acc).catch((e) =>
+          console.warn('[AccountStorage] Supabase update default notice:', e)
+        );
       }
-    });
+    }
 
-    this.persist();
+    this.persistLocal();
     return true;
   }
 }

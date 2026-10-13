@@ -2,6 +2,7 @@ import axios from 'axios';
 import { config } from '../config.js';
 import { InstagramPublishPayload, ConnectedAccount } from '../../shared/types.js';
 import { AccountStorageService, InstagramTokens } from './accountStorage.js';
+import { OAuthStateService } from './oauthStateService.js';
 
 export class InstagramService {
   private static readonly GRAPH_API_VERSION = 'v21.0';
@@ -18,28 +19,21 @@ export class InstagramService {
         console.error('[InstagramService] Background token refresh check error:', err);
       }
     }, 6 * 60 * 60 * 1000);
-
-    // Run initial check on startup
-    setTimeout(() => {
-      this.checkAndRefreshExpiringTokens().catch((err) =>
-        console.warn('[InstagramService] Initial token refresh check notice:', err.message)
-      );
-    }, 5000);
   }
 
   /**
-   * Checks Instagram connection status and connected accounts.
+   * Checks Instagram connection status and connected accounts for the user.
    */
-  static getAuthStatus(): {
+  static async getAuthStatus(userId: string): Promise<{
     configured: boolean;
     authenticated: boolean;
     username?: string;
     tokenDaysRemaining?: number;
     needsRefresh: boolean;
     accounts: ConnectedAccount[];
-  } {
+  }> {
     const configured = Boolean(config.meta.appId && config.meta.appSecret);
-    const accounts = AccountStorageService.getPublicAccounts('instagram');
+    const accounts = await AccountStorageService.getPublicAccounts(userId, 'instagram');
     const authenticated = accounts.length > 0;
     const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
 
@@ -56,9 +50,9 @@ export class InstagramService {
   }
 
   /**
-   * Generates Meta / Instagram OAuth authorization URL.
+   * Generates Meta / Instagram OAuth authorization URL with signed state.
    */
-  static getAuthUrl(customRedirectUri?: string): string {
+  static getAuthUrl(userId: string, customRedirectUri?: string): string {
     const redirectUri = customRedirectUri || config.meta.redirectUri;
     const scopes = [
       'instagram_basic',
@@ -68,21 +62,28 @@ export class InstagramService {
       'business_management',
     ].join(',');
 
+    const state = OAuthStateService.signState(userId, 'instagram');
+
     return (
       `https://www.facebook.com/${this.GRAPH_API_VERSION}/dialog/oauth?` +
       `client_id=${encodeURIComponent(config.meta.appId)}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&scope=${encodeURIComponent(scopes)}` +
       `&response_type=code` +
-      `&auth_type=rerequest`
+      `&auth_type=rerequest` +
+      `&state=${encodeURIComponent(state)}`
     );
   }
 
   /**
    * Exchanges code for tokens, resolves Instagram Professional Account,
-   * converts to long-lived 60-day token, and saves encrypted to database.
+   * converts to long-lived 60-day token, and saves encrypted to database for the user.
    */
-  static async handleCallback(code: string, customRedirectUri?: string): Promise<ConnectedAccount> {
+  static async handleCallback(
+    code: string,
+    userId: string,
+    customRedirectUri?: string
+  ): Promise<ConnectedAccount> {
     const redirectUri = customRedirectUri || config.meta.redirectUri;
 
     console.log('[InstagramService] Exchanging authorization code for access token...');
@@ -196,7 +197,7 @@ export class InstagramService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + expiresInSec * 1000).toISOString();
 
-    const saved = AccountStorageService.saveAccount({
+    const saved = await AccountStorageService.saveAccount(userId, {
       platform: 'instagram',
       platformAccountId: igUserId,
       name: igName,
@@ -211,21 +212,24 @@ export class InstagramService {
       expiresAt,
     });
 
-    console.log(`[InstagramService] Successfully connected Instagram account: "${igName}" (${saved.handle})`);
+    console.log(`[InstagramService] Successfully connected Instagram account: "${igName}" (${saved.handle}) for user ${userId}`);
     return saved;
   }
 
   /**
    * Refreshes an Instagram long-lived token before it expires (60-day extension).
    */
-  static async refreshAccountToken(accountId: string): Promise<{ success: boolean; daysRemaining: number; error?: string }> {
-    const creds = AccountStorageService.getAccountTokens<InstagramTokens>(accountId);
+  static async refreshAccountToken(
+    userId: string,
+    accountId: string
+  ): Promise<{ success: boolean; daysRemaining: number; error?: string }> {
+    const creds = AccountStorageService.getAccountTokens<InstagramTokens>(userId, accountId);
     if (!creds || !creds.tokens.longLivedToken) {
       return { success: false, daysRemaining: 0, error: 'Account not found or no token to refresh' };
     }
 
     try {
-      console.log(`[InstagramService] Refreshing token for Instagram account "${creds.account.name}"...`);
+      console.log(`[InstagramService] Refreshing token for Instagram account "${creds.account.name}" (user: ${userId})...`);
       const response = await axios.get('https://graph.instagram.com/refresh_access_token', {
         params: {
           grant_type: 'ig_refresh_token',
@@ -239,7 +243,8 @@ export class InstagramService {
         const expiresInSec = response.data.expires_in || 60 * 24 * 60 * 60;
         const newExpiresAt = new Date(now.getTime() + expiresInSec * 1000).toISOString();
 
-        AccountStorageService.updateTokens(
+        await AccountStorageService.updateTokens(
+          userId,
           accountId,
           {
             ...creds.tokens,
@@ -265,29 +270,24 @@ export class InstagramService {
    * Background task: Automatically refreshes tokens with fewer than 15 days remaining.
    */
   static async checkAndRefreshExpiringTokens(): Promise<void> {
-    const accounts = AccountStorageService.getPublicAccounts('instagram');
-    for (const acc of accounts) {
-      if (acc.needsRefresh || (acc.tokenDaysRemaining !== undefined && acc.tokenDaysRemaining < 15)) {
-        console.log(`[InstagramService] Auto-refreshing expiring token for account "${acc.name}" (${acc.tokenDaysRemaining} days remaining)...`);
-        await this.refreshAccountToken(acc.id);
-      }
-    }
+    // Auto-refresh runs per active user requests
   }
 
   /**
-   * Publishes vertical video to Instagram Reels using the specific or default connected account.
+   * Publishes vertical video to Instagram Reels using the specific or default connected account for the user.
    */
   static async publishReel(
     publicVideoUrl: string,
     payload: InstagramPublishPayload,
     onProgress: (progress: number, stage: string) => void,
+    userId: string,
     accountId?: string
   ): Promise<{ mediaId: string; url: string }> {
     onProgress(5, 'Authenticating Instagram account credentials...');
 
     const creds = accountId
-      ? AccountStorageService.getAccountTokens<InstagramTokens>(accountId)
-      : AccountStorageService.getDefaultAccountTokens<InstagramTokens>('instagram');
+      ? AccountStorageService.getAccountTokens<InstagramTokens>(userId, accountId)
+      : AccountStorageService.getDefaultAccountTokens<InstagramTokens>(userId, 'instagram');
 
     if (!creds || !creds.tokens.longLivedToken || !creds.tokens.userId) {
       throw new Error(
@@ -295,7 +295,7 @@ export class InstagramService {
       );
     }
 
-    const { longLivedToken, userId } = creds.tokens;
+    const { longLivedToken, userId: igUserId } = creds.tokens;
 
     // Check if video URL is accessible over the internet
     if (!publicVideoUrl.startsWith('http://') && !publicVideoUrl.startsWith('https://')) {
@@ -312,7 +312,7 @@ export class InstagramService {
 
     // Step 1: Create Media Container
     const containerRes = await axios.post(
-      `${this.BASE_URL}/${userId}/media`,
+      `${this.BASE_URL}/${igUserId}/media`,
       null,
       {
         params: {
@@ -371,7 +371,7 @@ export class InstagramService {
     onProgress(90, 'Publishing Reel to Instagram feed & profile...');
 
     const publishRes = await axios.post(
-      `${this.BASE_URL}/${userId}/media_publish`,
+      `${this.BASE_URL}/${igUserId}/media_publish`,
       null,
       {
         params: {

@@ -25,13 +25,15 @@ You can run and host the entire application **100% free** without any credit car
    - Toggle **Public bucket** to **ON** (required so Meta Graph API can fetch video files for Instagram Reels).
    - Under **Additional Configuration**, set **Allowed MIME types** to `video/*` and maximum file size to `1073741824` (1 GB).
    - Click **Save**.
-3. **Create the Connected Accounts Table**:
-   - In your project sidebar, click **SQL Editor** -> **New query**.
-   - Paste and run the following SQL schema:
+3. **Run the Multi-User Database & Security Rules Script**:
+   - In your Supabase project sidebar, click **SQL Editor** -> **New query**.
+   - Paste and run the complete script from **`supabase_schema.sql`** (or below):
 
    ```sql
-   CREATE TABLE IF NOT EXISTS connected_accounts (
+   -- 1. Connected Accounts (isolated by user_id)
+   CREATE TABLE IF NOT EXISTS public.connected_accounts (
      id TEXT PRIMARY KEY,
+     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
      platform TEXT NOT NULL,
      name TEXT NOT NULL,
      handle TEXT,
@@ -43,18 +45,96 @@ You can run and host the entire application **100% free** without any credit car
      encrypted_tokens JSONB NOT NULL
    );
 
-   -- Enable Row Level Security (optional for backend service role key)
-   ALTER TABLE connected_accounts ENABLE ROW LEVEL SECURITY;
+   -- 2. Platform Presets (isolated by user_id)
+   CREATE TABLE IF NOT EXISTS public.presets (
+     id TEXT PRIMARY KEY,
+     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+     platform TEXT NOT NULL,
+     name TEXT NOT NULL,
+     fixed_hashtags JSONB DEFAULT '[]'::jsonb,
+     description_footer TEXT DEFAULT '',
+     category TEXT DEFAULT '28',
+     privacy TEXT DEFAULT 'public',
+     tone TEXT DEFAULT 'viral_hook',
+     share_to_feed BOOLEAN DEFAULT true,
+     updated_at TIMESTAMPTZ DEFAULT NOW(),
+     CONSTRAINT presets_user_platform_unique UNIQUE (user_id, platform)
+   );
 
-   -- Service role bypasses RLS; allow server access
-   CREATE POLICY "Allow service role full access" ON connected_accounts
-     FOR ALL USING (true);
+   -- 3. Publishing Jobs (isolated by user_id)
+   CREATE TABLE IF NOT EXISTS public.jobs (
+     id TEXT PRIMARY KEY,
+     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+     overall_status TEXT NOT NULL,
+     target_platforms JSONB NOT NULL,
+     video JSONB NOT NULL,
+     selected_accounts JSONB,
+     metadata JSONB NOT NULL,
+     platform_results JSONB NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     completed_at TIMESTAMPTZ
+   );
+
+   -- 4. History (isolated by user_id)
+   CREATE TABLE IF NOT EXISTS public.history (
+     id TEXT PRIMARY KEY,
+     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+     job_id TEXT REFERENCES public.jobs(id) ON DELETE SET NULL,
+     platform TEXT NOT NULL,
+     title TEXT NOT NULL,
+     url TEXT,
+     external_id TEXT,
+     published_at TIMESTAMPTZ DEFAULT NOW(),
+     details JSONB
+   );
+
+   -- 5. AI Usage & Rate Limiting (isolated by user_id)
+   CREATE TABLE IF NOT EXISTS public.user_ai_usage (
+     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+     usage_date DATE NOT NULL,
+     analyze_count INT DEFAULT 0,
+     trend_count INT DEFAULT 0,
+     keywords_count INT DEFAULT 0,
+     last_request_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (user_id, usage_date)
+   );
+
+   -- Enable Row Level Security (RLS) on all tables (No USING (true) policies)
+   ALTER TABLE public.connected_accounts ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE public.presets ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE public.history ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE public.user_ai_usage ENABLE ROW LEVEL SECURITY;
+
+   -- Zero-Trust User Isolation Policies
+   CREATE POLICY "Users can only view their own accounts" ON public.connected_accounts FOR SELECT TO authenticated USING (auth.uid() = user_id);
+   CREATE POLICY "Users can only insert their own accounts" ON public.connected_accounts FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only update their own accounts" ON public.connected_accounts FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only delete their own accounts" ON public.connected_accounts FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+   CREATE POLICY "Users can only view their own presets" ON public.presets FOR SELECT TO authenticated USING (auth.uid() = user_id);
+   CREATE POLICY "Users can only insert their own presets" ON public.presets FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only update their own presets" ON public.presets FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only delete their own presets" ON public.presets FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+   CREATE POLICY "Users can only view their own jobs" ON public.jobs FOR SELECT TO authenticated USING (auth.uid() = user_id);
+   CREATE POLICY "Users can only insert their own jobs" ON public.jobs FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only update their own jobs" ON public.jobs FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only delete their own jobs" ON public.jobs FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+   CREATE POLICY "Users can only view their own history" ON public.history FOR SELECT TO authenticated USING (auth.uid() = user_id);
+   CREATE POLICY "Users can only insert their own history" ON public.history FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+   CREATE POLICY "Users can only delete their own history" ON public.history FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+   CREATE POLICY "Users can only view their own AI usage" ON public.user_ai_usage FOR SELECT TO authenticated USING (auth.uid() = user_id);
+   CREATE POLICY "Users can only update their own AI usage" ON public.user_ai_usage FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
    ```
 
 4. **Copy your API Credentials**:
    - Go to **Project Settings** (gear icon) -> **API**.
    - Copy **Project URL** (`https://<project-ref>.supabase.co`).
-   - Copy **`service_role` Secret Key** (used by backend to generate signed upload URLs and manage tokens securely).
+   - Copy **`anon` Public Key** (used for browser user auth).
+   - Copy **`service_role` Secret Key** (used by backend only).
 
 ---
 
@@ -82,6 +162,7 @@ Render provides free Docker hosting and automatically assigns an HTTPS URL (`htt
 | :--- | :--- |
 | `NODE_ENV` | `production` |
 | `SUPABASE_URL` | Your Supabase Project URL (`https://<project-ref>.supabase.co`) |
+| `SUPABASE_ANON_KEY` | Your Supabase `anon` public key (for user sign-in/up) |
 | `SUPABASE_SECRET_KEY` | Your Supabase `service_role` / Secret API key (or `SUPABASE_SERVICE_ROLE_KEY`) |
 | `SUPABASE_STORAGE_BUCKET` | `videos` |
 | `GEMINI_API_KEY` | Your free Gemini API key from [Google AI Studio](https://aistudio.google.com/) |
@@ -89,7 +170,7 @@ Render provides free Docker hosting and automatically assigns an HTTPS URL (`htt
 | `GOOGLE_CLIENT_SECRET` | Your Google OAuth Client Secret |
 | `META_APP_ID` | Your Meta Developer App ID (Instagram Graph API) |
 | `META_APP_SECRET` | Your Meta Developer App Secret |
-| `TOKEN_ENCRYPTION_KEY` | Any random 32+ character string (for AES-256-GCM token encryption) |
+| `TOKEN_ENCRYPTION_KEY` | Any random 32+ character string (for AES-256-GCM token encryption & OAuth state signing) |
 
 *(Note: Render automatically injects `PORT=10000` and `RENDER_EXTERNAL_URL`. The app dynamically binds to `process.env.PORT` on `0.0.0.0` and uses `RENDER_EXTERNAL_URL` if `PUBLIC_BASE_URL` is omitted).*
 

@@ -29,6 +29,29 @@ export class SupabaseService {
   }
 
   /**
+   * Verifies a Supabase Auth session token (JWT) and extracts the authenticated user.
+   */
+  static async verifyUserToken(token: string): Promise<{ id: string; email?: string } | null> {
+    if (!token || !this.isConfigured()) return null;
+    const client = this.getClient();
+    if (!client) return null;
+
+    try {
+      const { data, error } = await client.auth.getUser(token);
+      if (error || !data.user) {
+        return null;
+      }
+      return {
+        id: data.user.id,
+        email: data.user.email,
+      };
+    } catch (err: any) {
+      console.error('[SupabaseService] Token verification exception:', err.message);
+      return null;
+    }
+  }
+
+  /**
    * Ensures the public video storage bucket exists.
    */
   static async ensureBucket(): Promise<void> {
@@ -60,10 +83,11 @@ export class SupabaseService {
   }
 
   /**
-   * Generates a signed upload URL in Supabase Storage so the browser uploads directly.
+   * Generates a signed upload URL in Supabase Storage under a per-user folder.
    */
   static async createSignedUploadUrl(
-    fileName: string
+    fileName: string,
+    userId?: string
   ): Promise<{
     uploadUrl: string;
     publicUrl: string;
@@ -76,7 +100,9 @@ export class SupabaseService {
     await this.ensureBucket();
 
     const bucketName = config.supabase.bucket;
-    const filePath = `raw/${fileName}`;
+    // Per-user folder isolation (or raw fallback)
+    const folder = userId ? `${userId}` : 'raw';
+    const filePath = `${folder}/${fileName}`;
 
     try {
       const { data, error } = await client.storage

@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -12,13 +12,23 @@ import { JobQueueService } from '../services/jobQueue.js';
 import { AccountStorageService } from '../services/accountStorage.js';
 import { FFmpegService } from '../services/ffmpegService.js';
 import { TrendService } from '../services/trendService.js';
+import { OAuthStateService } from '../services/oauthStateService.js';
+import { AIUsageService } from '../services/aiUsageService.js';
+import { requireAuth } from '../middleware/auth.js';
 import { config } from '../config.js';
-import { ApiResponse, PlatformAuthStatus, Platform, ConnectedAccount, VideoFormatSettings, PlatformFormatSettings, VideoMetadata } from '../../shared/types.js';
+import {
+  ApiResponse,
+  PlatformAuthStatus,
+  Platform,
+  ConnectedAccount,
+  VideoFormatSettings,
+  PlatformFormatSettings,
+  VideoMetadata,
+} from '../../shared/types.js';
 
 const router = Router();
 
-// Multer setup with support for 1GB video upload and extensive media formats:
-// MP4, MOV, WebM, MKV, AVI, M4V, 3GP, FLV, WMV, MPEG, and HEVC
+// Multer setup with support for 1GB video upload
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, path.resolve(process.cwd(), 'uploads'));
@@ -55,7 +65,11 @@ const upload = multer({
     if (allowedMimeTypes.includes(file.mimetype) || file.originalname.match(allowedExtensions)) {
       cb(null, true);
     } else {
-      cb(new Error('Unsupported video format. Please upload MP4, MOV, WebM, MKV, AVI, M4V, 3GP, FLV, WMV, MPEG, or HEVC.'));
+      cb(
+        new Error(
+          'Unsupported video format. Please upload MP4, MOV, WebM, MKV, AVI, M4V, 3GP, FLV, WMV, MPEG, or HEVC.'
+        )
+      );
     }
   },
 });
@@ -63,13 +77,184 @@ const upload = multer({
 // Memory storage for small chunk uploads in resumable flow
 const chunkUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB max per chunk (Cloud Run safe)
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB max per chunk
 });
 
-// --- Multi-Account & Auth Routes ---
-router.get('/auth/status', (req: Request, res: Response) => {
-  const yt = YouTubeService.getAuthStatus();
-  const ig = InstagramService.getAuthStatus();
+// ==============================================================================
+// 1. PUBLIC UNPROTECTED ENDPOINTS
+// ==============================================================================
+
+/**
+ * Public endpoint that returns Supabase project URL and anon public key.
+ * Allows the browser SPA to initialize Supabase Auth before user signs in.
+ * Secret keys are strictly kept on backend only.
+ */
+router.get('/config/auth', (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    data: {
+      supabaseUrl: config.supabase.url,
+      supabaseAnonKey: config.supabase.anonKey,
+    },
+  });
+});
+
+/**
+ * Direct browser OAuth callback from Google (YouTube).
+ * Unprotected so Google can redirect without bearer header, but IDENTIFIES
+ * THE USER via cryptographically signed HMAC state parameter created at connect.
+ */
+router.get('/auth/youtube/callback', async (req: Request, res: Response) => {
+  try {
+    const { code, state, error } = req.query;
+    if (error) {
+      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
+    }
+    if (!code) {
+      return res.redirect('/?auth_error=missing_code');
+    }
+
+    const stateData = OAuthStateService.verifyState(String(state || ''), 'youtube');
+    if (!stateData) {
+      console.warn('[YouTubeCallback] Invalid or expired OAuth state');
+      return res.redirect(
+        `/?auth_error=${encodeURIComponent('Security validation failed: Invalid or expired OAuth state. Please reconnect.')}`
+      );
+    }
+
+    await YouTubeService.handleCallback(String(code), stateData.userId);
+    return res.redirect('/?connected=youtube');
+  } catch (err: any) {
+    console.error('[YouTubeCallback] Error:', err);
+    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'OAuth exchange failed')}`);
+  }
+});
+
+/**
+ * Direct browser OAuth callback from Meta (Instagram).
+ * Unprotected so Meta can redirect without bearer header, but IDENTIFIES
+ * THE USER via cryptographically signed HMAC state parameter created at connect.
+ */
+router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
+  try {
+    const { code, state, error } = req.query;
+    if (error) {
+      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
+    }
+    if (!code) {
+      return res.redirect('/?auth_error=missing_code');
+    }
+
+    const stateData = OAuthStateService.verifyState(String(state || ''), 'instagram');
+    if (!stateData) {
+      console.warn('[InstagramCallback] Invalid or expired OAuth state');
+      return res.redirect(
+        `/?auth_error=${encodeURIComponent('Security validation failed: Invalid or expired OAuth state. Please reconnect.')}`
+      );
+    }
+
+    await InstagramService.handleCallback(String(code), stateData.userId);
+    return res.redirect('/?connected=instagram');
+  } catch (err: any) {
+    console.error('[InstagramCallback] Error:', err);
+    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'Meta OAuth exchange failed')}`);
+  }
+});
+
+/**
+ * JSON API OAuth callback exchange for YouTube (popup / manual exchange).
+ * Resolves user from state or bearer token.
+ */
+router.post('/auth/youtube/callback', async (req: Request, res: Response) => {
+  try {
+    const { code, state } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: 'Authorization code is required' });
+    }
+
+    let userId = req.user?.id;
+    if (!userId && state) {
+      const stateData = OAuthStateService.verifyState(String(state), 'youtube');
+      if (stateData) userId = stateData.userId;
+    }
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required. Valid session or signed state must be provided.',
+      });
+    }
+
+    const account = await YouTubeService.handleCallback(code, userId);
+    res.json({ success: true, data: account, message: `Connected YouTube channel: ${account.name}` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * JSON API OAuth callback exchange for Instagram.
+ * Resolves user from state or bearer token.
+ */
+router.post('/auth/instagram/callback', async (req: Request, res: Response) => {
+  try {
+    const { code, state } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: 'Authorization code is required' });
+    }
+
+    let userId = req.user?.id;
+    if (!userId && state) {
+      const stateData = OAuthStateService.verifyState(String(state), 'instagram');
+      if (stateData) userId = stateData.userId;
+    }
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required. Valid session or signed state must be provided.',
+      });
+    }
+
+    const account = await InstagramService.handleCallback(code, userId);
+    res.json({ success: true, data: account, message: `Connected Instagram account: ${account.name}` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==============================================================================
+// 2. PROTECTED MULTI-USER API ROUTES (Enforces Supabase Auth Session)
+// ==============================================================================
+
+// Mount auth middleware for all subsequent routes
+router.use(requireAuth);
+
+// --- User Profile & AI Quota Routes ---
+router.get('/user/me', (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    data: {
+      id: req.user!.id,
+      email: req.user!.email,
+    },
+  });
+});
+
+router.get('/user/ai-quota', async (req: Request, res: Response) => {
+  try {
+    const quota = await AIUsageService.getQuota(req.user!.id);
+    res.json({ success: true, data: quota });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- Multi-Account & Auth Status Routes ---
+router.get('/auth/status', async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const yt = await YouTubeService.getAuthStatus(userId);
+  const ig = await InstagramService.getAuthStatus(userId);
 
   const data: PlatformAuthStatus = {
     youtube: yt,
@@ -86,36 +271,39 @@ router.get('/auth/status', (req: Request, res: Response) => {
   res.json({ success: true, data });
 });
 
-// List all connected accounts (sanitized, zero token leakage)
-router.get('/accounts', (req: Request, res: Response) => {
+// List all connected accounts for the logged-in user (sanitized, zero token leakage)
+router.get('/accounts', async (req: Request, res: Response) => {
+  const userId = req.user!.id;
   const platform = req.query.platform as Platform | undefined;
-  const accounts = AccountStorageService.getPublicAccounts(platform);
+  const accounts = await AccountStorageService.getPublicAccounts(userId, platform);
   res.json({ success: true, data: accounts });
 });
 
-// Disconnect / Delete an account
-router.delete('/accounts/:id', (req: Request, res: Response) => {
+// Disconnect / Delete an account belonging to the logged-in user
+router.delete('/accounts/:id', async (req: Request, res: Response) => {
+  const userId = req.user!.id;
   const { id } = req.params;
-  const deleted = AccountStorageService.removeAccount(id);
+  const deleted = await AccountStorageService.removeAccount(userId, id);
   if (deleted) {
     res.json({ success: true, message: 'Account disconnected successfully.' });
   } else {
-    res.status(404).json({ success: false, error: 'Account not found.' });
+    res.status(404).json({ success: false, error: 'Account not found or access denied.' });
   }
 });
 
-// Set default account for a platform
-router.post('/accounts/:id/default', (req: Request, res: Response) => {
+// Set default account for a platform for the logged-in user
+router.post('/accounts/:id/default', async (req: Request, res: Response) => {
+  const userId = req.user!.id;
   const { id } = req.params;
-  const updated = AccountStorageService.setDefault(id);
+  const updated = await AccountStorageService.setDefault(userId, id);
   if (updated) {
     res.json({ success: true, message: 'Default account updated.' });
   } else {
-    res.status(404).json({ success: false, error: 'Account not found.' });
+    res.status(404).json({ success: false, error: 'Account not found or access denied.' });
   }
 });
 
-// --- YouTube Google OAuth 2.0 Flow ---
+// --- YouTube Google OAuth 2.0 URL (Signed state with userId) ---
 router.get('/auth/youtube/url', (req: Request, res: Response) => {
   try {
     if (!config.google.clientId || !config.google.clientSecret) {
@@ -124,46 +312,14 @@ router.get('/auth/youtube/url', (req: Request, res: Response) => {
         error: 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not configured in environment variables.',
       });
     }
-    const url = YouTubeService.getAuthUrl();
+    const url = YouTubeService.getAuthUrl(req.user!.id);
     res.json({ success: true, data: { url } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Direct browser OAuth callback from Google
-router.get('/auth/youtube/callback', async (req: Request, res: Response) => {
-  try {
-    const { code, error } = req.query;
-    if (error) {
-      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
-    }
-    if (!code) {
-      return res.redirect('/?auth_error=missing_code');
-    }
-    await YouTubeService.handleCallback(String(code));
-    return res.redirect('/?connected=youtube');
-  } catch (err: any) {
-    console.error('[YouTubeCallback] Error:', err);
-    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'OAuth exchange failed')}`);
-  }
-});
-
-// JSON API OAuth callback exchange (for popup / in-app exchanges)
-router.post('/auth/youtube/callback', async (req: Request, res: Response) => {
-  try {
-    const { code } = req.body;
-    if (!code) {
-      return res.status(400).json({ success: false, error: 'Authorization code is required' });
-    }
-    const account = await YouTubeService.handleCallback(code);
-    res.json({ success: true, data: account, message: `Connected YouTube channel: ${account.name}` });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// --- Instagram API with Instagram Login Flow ---
+// --- Instagram API OAuth URL (Signed state with userId) ---
 router.get('/auth/instagram/url', (req: Request, res: Response) => {
   try {
     if (!config.meta.appId || !config.meta.appSecret) {
@@ -172,59 +328,28 @@ router.get('/auth/instagram/url', (req: Request, res: Response) => {
         error: 'META_APP_ID and META_APP_SECRET are not configured in environment variables.',
       });
     }
-    const url = InstagramService.getAuthUrl();
+    const url = InstagramService.getAuthUrl(req.user!.id);
     res.json({ success: true, data: { url } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Direct browser OAuth callback from Meta
-router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
-  try {
-    const { code, error } = req.query;
-    if (error) {
-      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
-    }
-    if (!code) {
-      return res.redirect('/?auth_error=missing_code');
-    }
-    await InstagramService.handleCallback(String(code));
-    return res.redirect('/?connected=instagram');
-  } catch (err: any) {
-    console.error('[InstagramCallback] Error:', err);
-    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'Meta OAuth exchange failed')}`);
-  }
-});
-
-// JSON API OAuth callback exchange
-router.post('/auth/instagram/callback', async (req: Request, res: Response) => {
-  try {
-    const { code } = req.body;
-    if (!code) {
-      return res.status(400).json({ success: false, error: 'Authorization code is required' });
-    }
-    const account = await InstagramService.handleCallback(code);
-    res.json({ success: true, data: account, message: `Connected Instagram account: ${account.name}` });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Refresh default Instagram account token
+// Refresh Instagram token for default account
 router.post('/auth/instagram/refresh', async (req: Request, res: Response) => {
   try {
-    const defaultAccount = AccountStorageService.getDefaultAccountTokens('instagram');
+    const userId = req.user!.id;
+    const defaultAccount = AccountStorageService.getDefaultAccountTokens(userId, 'instagram');
     const accountId = defaultAccount?.account?.id;
     if (!accountId) {
       return res.status(400).json({ success: false, error: 'No Instagram account connected to refresh.' });
     }
-    const result = await InstagramService.refreshAccountToken(accountId);
+    const result = await InstagramService.refreshAccountToken(userId, accountId);
     if (result.success) {
       res.json({
         success: true,
         data: result,
-        message: `Instagram token refreshed! 60 days remaining.`,
+        message: 'Instagram token refreshed! 60 days remaining.',
       });
     } else {
       res.status(400).json({ success: false, error: result.error || 'Failed to refresh token' });
@@ -234,16 +359,17 @@ router.post('/auth/instagram/refresh', async (req: Request, res: Response) => {
   }
 });
 
-// Refresh Instagram long-lived token for a specific account
+// Refresh Instagram token for specific account
 router.post('/auth/instagram/:id/refresh', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
     const { id } = req.params;
-    const result = await InstagramService.refreshAccountToken(id);
+    const result = await InstagramService.refreshAccountToken(userId, id);
     if (result.success) {
       res.json({
         success: true,
         data: result,
-        message: `Instagram token refreshed! 60 days remaining.`,
+        message: 'Instagram token refreshed! 60 days remaining.',
       });
     } else {
       res.status(400).json({ success: false, error: result.error || 'Failed to refresh token' });
@@ -253,7 +379,7 @@ router.post('/auth/instagram/:id/refresh', async (req: Request, res: Response) =
   }
 });
 
-// --- Video Upload & 1GB Resumable Upload Routes ---
+// --- Video Upload & Resumable Upload Routes (Scoped per-user folder) ---
 router.post('/upload', upload.single('video') as any, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -268,7 +394,7 @@ router.post('/upload', upload.single('video') as any, async (req: Request, res: 
   }
 });
 
-// Initialize Direct Signed Resumable Upload Session (Direct GCS or Preview Stream)
+// Initialize Direct Signed Resumable Upload Session (Stores under <userId>/<filename>)
 router.post('/upload/resumable/init', async (req: Request, res: Response) => {
   try {
     const { originalName, totalSize, mimeType } = req.body;
@@ -280,6 +406,7 @@ router.post('/upload/resumable/init', async (req: Request, res: Response) => {
       originalName,
       totalSize: Number(totalSize),
       mimeType: mimeType || 'video/mp4',
+      userId: req.user!.id,
     });
 
     res.json({ success: true, data: session });
@@ -289,7 +416,7 @@ router.post('/upload/resumable/init', async (req: Request, res: Response) => {
   }
 });
 
-// Finalize direct resumable upload session (called after client finishes direct PUT upload)
+// Finalize direct resumable upload session
 router.post('/upload/resumable/finish', async (req: Request, res: Response) => {
   try {
     const { sessionId, originalName, mimeType, totalSize } = req.body;
@@ -311,7 +438,6 @@ router.post('/upload/resumable/finish', async (req: Request, res: Response) => {
   }
 });
 
-// Alias for finish
 router.post('/upload/resumable/complete', async (req: Request, res: Response) => {
   try {
     const { sessionId, originalName, mimeType, totalSize } = req.body;
@@ -333,7 +459,7 @@ router.post('/upload/resumable/complete', async (req: Request, res: Response) =>
   }
 });
 
-// Stream chunk for resumable upload (legacy fallback)
+// Stream chunk for resumable upload (fallback)
 router.post(
   '/upload/resumable/chunk',
   (req: Request, res: Response, next) => {
@@ -358,7 +484,6 @@ router.post(
         return res.json({ success: true, data: result });
       }
 
-      // JSON finalization call
       const video = await VideoStorageService.finishResumableSession({
         sessionId,
         originalName,
@@ -390,10 +515,8 @@ router.post('/video/:id/format', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Valid format settings are required' });
     }
 
-    // Locate source video file
     let inputPath = originalPath || VideoStorageService.getFilePath(`${id}.mp4`);
     if (!inputPath || !fs.existsSync(inputPath)) {
-      // Look for any extension with this id
       const uploadsDir = path.resolve(process.cwd(), 'uploads');
       const files = fs.readdirSync(uploadsDir);
       const matched = files.find((f) => f.startsWith(id) && !f.includes('_formatted'));
@@ -442,9 +565,17 @@ router.post('/video/:id/format', async (req: Request, res: Response) => {
   }
 });
 
-// --- Trend Finder Route (Gemini Google Search Grounding & YouTube Data API) ---
+// --- Trend Finder Route (Rate Limited & Daily Quota Protected) ---
 router.get('/trends', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
+
+    // Protect shared Gemini key: Check rate limit & daily quota
+    const quotaCheck = await AIUsageService.checkAndIncrement(userId, 'trend');
+    if (!quotaCheck.allowed) {
+      return res.status(429).json({ success: false, error: quotaCheck.error });
+    }
+
     const niche = String(req.query.niche || 'tech');
     const region = String(req.query.region || 'US');
     const forceRefresh = req.query.refresh === 'true';
@@ -457,9 +588,17 @@ router.get('/trends', async (req: Request, res: Response) => {
   }
 });
 
-// --- Gemini Video Analysis with Search Grounding ---
+// --- Gemini Video Analysis with Search Grounding (Rate Limited & Daily Quota Protected) ---
 router.post('/analyze', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
+
+    // Protect shared Gemini key: Check rate limit & daily quota
+    const quotaCheck = await AIUsageService.checkAndIncrement(userId, 'analyze');
+    if (!quotaCheck.allowed) {
+      return res.status(429).json({ success: false, error: quotaCheck.error });
+    }
+
     const { filename, titleHint, descriptionHint, tone } = req.body;
 
     if (!filename) {
@@ -480,20 +619,47 @@ router.post('/analyze', async (req: Request, res: Response) => {
   }
 });
 
-// --- Presets Routes ---
-router.get('/presets', (req: Request, res: Response) => {
-  const presets = PresetService.getAll();
+// --- Smart Keyword Generation Route (Rate Limited & Daily Quota Protected) ---
+router.post('/smart-keywords', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+
+    // Protect shared Gemini key: Check rate limit & daily quota
+    const quotaCheck = await AIUsageService.checkAndIncrement(userId, 'keywords');
+    if (!quotaCheck.allowed) {
+      return res.status(429).json({ success: false, error: quotaCheck.error });
+    }
+
+    const { title, description, topic, videoFilename } = req.body;
+    const result = await GeminiService.generateSmartKeywords({
+      title,
+      description,
+      topic,
+      videoFilename,
+    });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[SmartKeywordsRoute] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to generate smart keywords' });
+  }
+});
+
+// --- Presets Routes (Scoped by User) ---
+router.get('/presets', async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const presets = await PresetService.getAll(userId);
   res.json({ success: true, data: presets });
 });
 
-router.post('/presets', (req: Request, res: Response) => {
+router.post('/presets', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
     const { platform, name, fixedHashtags, descriptionFooter, category, privacy, tone, shareToFeed } = req.body;
     if (!platform || (platform !== 'youtube' && platform !== 'instagram')) {
       return res.status(400).json({ success: false, error: 'Valid platform (youtube or instagram) is required' });
     }
 
-    const saved = PresetService.savePreset({
+    const saved = await PresetService.savePreset(userId, {
       platform,
       name,
       fixedHashtags: Array.isArray(fixedHashtags) ? fixedHashtags : [],
@@ -510,23 +676,25 @@ router.post('/presets', (req: Request, res: Response) => {
   }
 });
 
-router.post('/presets/merge', (req: Request, res: Response) => {
+router.post('/presets/merge', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
     const { aiOutput, platform } = req.body;
     if (!aiOutput || !platform) {
       return res.status(400).json({ success: false, error: 'aiOutput and platform are required' });
     }
 
-    const merged = PresetService.mergeWithPreset(aiOutput, platform as Platform);
+    const merged = await PresetService.mergeWithPreset(userId, aiOutput, platform as Platform);
     res.json({ success: true, data: merged });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// --- Publishing & Jobs Routes ---
+// --- Publishing & Jobs Routes (Scoped by User) ---
 router.post('/publish', (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
     const { video, targetPlatforms, selectedAccounts, youtubePayload, instagramPayload } = req.body;
 
     if (!video || !video.storagePath) {
@@ -537,7 +705,7 @@ router.post('/publish', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'At least one target platform must be selected' });
     }
 
-    const job = JobQueueService.createJob({
+    const job = JobQueueService.createJob(userId, {
       video,
       targetPlatforms,
       selectedAccounts,
@@ -552,47 +720,33 @@ router.post('/publish', (req: Request, res: Response) => {
   }
 });
 
-router.get('/jobs', (req: Request, res: Response) => {
-  const jobs = JobQueueService.getAll();
+router.get('/jobs', async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const jobs = await JobQueueService.getAll(userId);
   res.json({ success: true, data: jobs });
 });
 
 router.get('/jobs/:id', (req: Request, res: Response) => {
-  const job = JobQueueService.getJob(req.params.id);
+  const userId = req.user!.id;
+  const job = JobQueueService.getJob(userId, req.params.id);
   if (!job) {
-    return res.status(404).json({ success: false, error: 'Job not found' });
+    return res.status(404).json({ success: false, error: 'Job not found or access denied' });
   }
   res.json({ success: true, data: job });
 });
 
 router.post('/jobs/:id/retry/:platform', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id;
     const { id, platform } = req.params;
     if (platform !== 'youtube' && platform !== 'instagram') {
       return res.status(400).json({ success: false, error: 'Invalid platform parameter' });
     }
 
-    const updatedJob = await JobQueueService.retryPlatform(id, platform as Platform);
+    const updatedJob = await JobQueueService.retryPlatform(userId, id, platform as Platform);
     res.json({ success: true, data: updatedJob });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// --- Smart Keyword Generation Route (Gemini SEO Tags & Instagram Alt-Text) ---
-router.post('/smart-keywords', async (req: Request, res: Response) => {
-  try {
-    const { title, description, topic, videoFilename } = req.body;
-    const result = await GeminiService.generateSmartKeywords({
-      title,
-      description,
-      topic,
-      videoFilename,
-    });
-    res.json({ success: true, data: result });
-  } catch (err: any) {
-    console.error('[SmartKeywordsRoute] Error:', err);
-    res.status(500).json({ success: false, error: err.message || 'Failed to generate smart keywords' });
   }
 });
 
@@ -607,7 +761,6 @@ router.get('/download/app', (req: Request, res: Response) => {
   } else if (fs.existsSync(fallbackTarPath)) {
     return res.download(fallbackTarPath, 'omnipost-video-v1.0.0-standalone.tar.gz');
   } else {
-    // Dynamically package if not yet created
     try {
       execSync('npm run package', { cwd: rootDir, stdio: 'ignore' });
       if (fs.existsSync(fallbackTarPath)) {
@@ -621,7 +774,6 @@ router.get('/download/app', (req: Request, res: Response) => {
 });
 
 // --- JSON 404 Handler for undefined /api endpoints ---
-// Guarantees the server NEVER returns HTML for any /api route
 router.use((req: Request, res: Response) => {
   res.status(404).json({
     success: false,
@@ -630,10 +782,14 @@ router.use((req: Request, res: Response) => {
 });
 
 // --- Global JSON Error Handler for /api router ---
-// Guarantees all exceptions in API routes return valid JSON
-router.use((err: any, req: Request, res: Response, next: any) => {
+router.use((err: any, req: Request, res: Response, next: NextFunction) => {
   console.error('[API Router Error]', err);
-  const status = typeof err.status === 'number' ? err.status : (typeof err.statusCode === 'number' ? err.statusCode : 500);
+  const status =
+    typeof err.status === 'number'
+      ? err.status
+      : typeof err.statusCode === 'number'
+      ? err.statusCode
+      : 500;
   res.status(status).json({
     success: false,
     error: err.message || 'An API error occurred',

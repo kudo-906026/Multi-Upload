@@ -1,6 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { Platform, PlatformPreset, AIAnalysisResult, YouTubePublishPayload, InstagramPublishPayload } from '../../shared/types.js';
+import {
+  Platform,
+  PlatformPreset,
+  AIAnalysisResult,
+  YouTubePublishPayload,
+  InstagramPublishPayload,
+} from '../../shared/types.js';
+import { SupabaseService } from './supabaseService.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const PRESETS_FILE = path.join(DATA_DIR, 'presets.json');
@@ -34,6 +41,7 @@ const DEFAULT_PRESETS: PlatformPreset[] = [
 ];
 
 export class PresetService {
+  // Keyed by `${userId}:${platform}`
   private static presets: Map<string, PlatformPreset> = new Map();
 
   static init(): void {
@@ -45,79 +53,153 @@ export class PresetService {
       try {
         const raw = fs.readFileSync(PRESETS_FILE, 'utf-8');
         const list: PlatformPreset[] = JSON.parse(raw);
-        list.forEach((p) => this.presets.set(p.platform, p));
-        console.log(`[PresetService] Loaded ${this.presets.size} presets from database.`);
+        list.forEach((p) => {
+          const key = p.userId ? `${p.userId}:${p.platform}` : `default:${p.platform}`;
+          this.presets.set(key, p);
+        });
       } catch (err) {
-        console.warn('[PresetService] Error loading presets, using defaults:', err);
-        this.saveDefaults();
+        console.warn('[PresetService] Error loading presets cache:', err);
       }
-    } else {
-      this.saveDefaults();
     }
   }
 
-  private static saveDefaults(): void {
-    DEFAULT_PRESETS.forEach((p) => this.presets.set(p.platform, p));
-    this.persist();
-  }
-
-  private static persist(): void {
+  private static persistLocal(): void {
     try {
       const list = Array.from(this.presets.values());
       fs.writeFileSync(PRESETS_FILE, JSON.stringify(list, null, 2), 'utf-8');
     } catch (err) {
-      console.error('[PresetService] Failed to persist presets to disk:', err);
+      console.error('[PresetService] Failed to persist presets locally:', err);
     }
   }
 
-  static getAll(): PlatformPreset[] {
-    return Array.from(this.presets.values());
+  /**
+   * Syncs user presets from Supabase.
+   */
+  static async syncUserPresets(userId: string): Promise<void> {
+    if (!SupabaseService.isConfigured() || !userId) return;
+    const client = SupabaseService.getClient();
+    if (!client) return;
+
+    try {
+      const { data, error } = await client
+        .from('presets')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (error) {
+        console.warn(`[PresetService] Notice querying presets for user ${userId}:`, error.message);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        data.forEach((row: any) => {
+          const key = `${userId}:${row.platform}`;
+          this.presets.set(key, {
+            id: row.id,
+            userId: row.user_id,
+            platform: row.platform,
+            name: row.name,
+            fixedHashtags: Array.isArray(row.fixed_hashtags) ? row.fixed_hashtags : [],
+            descriptionFooter: row.description_footer || '',
+            category: row.category || '28',
+            privacy: row.privacy || 'public',
+            tone: row.tone || 'viral_hook',
+            shareToFeed: row.share_to_feed ?? true,
+            updatedAt: row.updated_at || new Date().toISOString(),
+          });
+        });
+        this.persistLocal();
+      }
+    } catch (err: any) {
+      console.warn('[PresetService] Supabase sync presets error:', err.message);
+    }
   }
 
-  static getForPlatform(platform: Platform): PlatformPreset {
-    const existing = this.presets.get(platform);
+  static async getAll(userId: string): Promise<PlatformPreset[]> {
+    await this.syncUserPresets(userId);
+
+    const platforms: Platform[] = ['youtube', 'instagram'];
+    return platforms.map((p) => this.getForPlatformLocal(userId, p));
+  }
+
+  private static getForPlatformLocal(userId: string, platform: Platform): PlatformPreset {
+    const key = `${userId}:${platform}`;
+    const existing = this.presets.get(key);
     if (existing) return existing;
+
     const defaultPreset = DEFAULT_PRESETS.find((p) => p.platform === platform) || DEFAULT_PRESETS[0];
-    return defaultPreset;
+    return {
+      ...defaultPreset,
+      id: `preset-${platform}-${userId}`,
+      userId,
+    };
   }
 
-  static savePreset(preset: Partial<PlatformPreset> & { platform: Platform }): PlatformPreset {
-    const existing = this.presets.get(preset.platform) || {
-      id: `preset-${preset.platform}-${Date.now()}`,
-      platform: preset.platform,
-      name: `${preset.platform.toUpperCase()} Preset`,
-      fixedHashtags: [],
-      descriptionFooter: '',
-      category: '28',
-      privacy: 'public',
-      tone: 'viral_hook',
-      shareToFeed: true,
-      updatedAt: new Date().toISOString(),
-    };
+  static async getForPlatform(userId: string, platform: Platform): Promise<PlatformPreset> {
+    await this.syncUserPresets(userId);
+    return this.getForPlatformLocal(userId, platform);
+  }
+
+  static async savePreset(
+    userId: string,
+    preset: Partial<PlatformPreset> & { platform: Platform }
+  ): Promise<PlatformPreset> {
+    const key = `${userId}:${preset.platform}`;
+    const existing = this.getForPlatformLocal(userId, preset.platform);
 
     const updated: PlatformPreset = {
       ...existing,
       ...preset,
+      userId,
+      platform: preset.platform,
       updatedAt: new Date().toISOString(),
     };
 
-    this.presets.set(preset.platform, updated);
-    this.persist();
+    this.presets.set(key, updated);
+    this.persistLocal();
+
+    // Persist to Supabase
+    const client = SupabaseService.getClient();
+    if (client) {
+      client
+        .from('presets')
+        .upsert(
+          {
+            id: updated.id,
+            user_id: userId,
+            platform: updated.platform,
+            name: updated.name,
+            fixed_hashtags: updated.fixedHashtags,
+            description_footer: updated.descriptionFooter,
+            category: updated.category,
+            privacy: updated.privacy,
+            tone: updated.tone,
+            share_to_feed: updated.shareToFeed,
+            updated_at: updated.updatedAt,
+          },
+          { onConflict: 'user_id,platform' }
+        )
+        .then(
+          ({ error }) => {
+            if (error) console.warn('[PresetService] Supabase upsert preset notice:', error.message);
+          },
+          (e: any) => console.warn('[PresetService] Error saving preset to Supabase:', e?.message)
+        );
+    }
+
     return updated;
   }
 
   /**
-   * Merges AI generated content with user presets:
-   * - Deduplicates and appends fixed hashtags
-   * - Appends footer to description
-   * - Applies saved privacy, category, and feed share settings
+   * Merges AI generated content with user presets.
    */
-  static mergeWithPreset(
+  static async mergeWithPreset(
+    userId: string,
     aiOutput: AIAnalysisResult,
     platform: Platform,
     customPreset?: PlatformPreset
-  ): { youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload } {
-    const preset = customPreset || this.getForPlatform(platform);
+  ): Promise<{ youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload }> {
+    const preset = customPreset || (await this.getForPlatform(userId, platform));
 
     if (platform === 'youtube') {
       const existingTags = new Set((aiOutput.youtube?.tags || []).map((t) => t.toLowerCase()));
@@ -141,7 +223,7 @@ export class PresetService {
 
       return {
         youtube: {
-          title: aiOutput.youtube?.title || 'New Video Upload',
+          title: aiOutput.youtube?.title || 'YouTube Shorts',
           description: finalDesc,
           tags: combinedTags,
           privacyStatus: preset.privacy,
@@ -150,7 +232,7 @@ export class PresetService {
         },
       };
     } else {
-      // Instagram
+      // Instagram Reels
       const existingHashtags = new Set((aiOutput.instagram?.hashtags || []).map((h) => h.toLowerCase()));
       const mergedHashtags = [...(aiOutput.instagram?.hashtags || [])];
 
@@ -163,19 +245,17 @@ export class PresetService {
       });
 
       const baseCaption = aiOutput.instagram?.caption || '';
-      const footer = preset.descriptionFooter ? preset.descriptionFooter : '';
+      const footer = preset.descriptionFooter ? `\n\n${preset.descriptionFooter}` : '';
       const finalCaption = `${baseCaption}${footer}`;
 
       return {
         instagram: {
           caption: finalCaption,
           hashtags: mergedHashtags,
-          shareToFeed: preset.shareToFeed ?? true,
+          shareToFeed: preset.shareToFeed,
+          altText: (aiOutput.instagram as any)?.altText,
         },
       };
     }
   }
 }
-
-// Initialize on module load
-PresetService.init();

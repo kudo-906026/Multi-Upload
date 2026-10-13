@@ -14,22 +14,31 @@ import {
   PlatformFormatSettings,
   NicheTrendReport,
   SmartKeywordsResult,
+  AIUsageQuota,
+  UserProfile,
 } from '@shared/types';
+import { getAccessToken } from './supabase';
 
 const BASE_URL = '/api';
 
 /**
  * Robust fetch wrapper that always checks response.ok and Content-Type before parsing JSON.
- * Throws clean, informative error messages if the server returns HTML (e.g. 404/500 proxy error)
- * preventing "Unexpected token '<', "<!DOCTYPE "... is not valid JSON".
+ * Automatically attaches Supabase session Bearer token for protected multi-user API calls.
  */
 async function safeFetch<T = any>(
   url: string,
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
+  const token = await getAccessToken();
+  const headers = new Headers(options?.headers || {});
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
   let res: Response;
   try {
-    res = await fetch(url, options);
+    res = await fetch(url, { ...options, headers });
   } catch (netErr: any) {
     throw new Error(`Network error connecting to ${url}: ${netErr.message || 'Server unreachable'}`);
   }
@@ -391,6 +400,18 @@ export class ApiClient {
       method: 'POST',
     });
     if (!res.data) throw new Error(res.error || 'Failed to retry platform');
+    return res.data;
+  }
+
+  static async getAIQuota(): Promise<AIUsageQuota> {
+    const res = await safeFetch<AIUsageQuota>(`${BASE_URL}/user/ai-quota`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch AI quota');
+    return res.data;
+  }
+
+  static async getMe(): Promise<UserProfile> {
+    const res = await safeFetch<UserProfile>(`${BASE_URL}/user/me`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch user profile');
     return res.data;
   }
 }

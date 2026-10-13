@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Video, Flame, History, Users, Settings } from 'lucide-react';
+import { Video, Flame, History, Users, Settings, Sparkles, Loader2 } from 'lucide-react';
 import { Header } from './components/Header';
+import { AuthScreen } from './components/AuthScreen';
 import { VideoUploader } from './components/VideoUploader';
 import { VideoFormatStep } from './components/VideoFormatStep';
 import { TrendsView } from './components/TrendsView';
@@ -20,10 +21,19 @@ import {
   PlatformAuthStatus,
   YouTubePublishPayload,
   InstagramPublishPayload,
+  UserProfile,
+  AIUsageQuota,
 } from '@shared/types';
 import { ApiClient } from './api';
+import { getCurrentUser, signOutUser, getSupabase } from './supabase';
 
 export const App: React.FC = () => {
+  // Authentication state
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [aiQuota, setAiQuota] = useState<AIUsageQuota | null>(null);
+
+  // App navigation & data state
   const [activeTab, setActiveTab] = useState<'create' | 'trends' | 'presets' | 'queue' | 'accounts' | 'settings'>('create');
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(['youtube', 'instagram']);
   const [currentVideo, setCurrentVideo] = useState<VideoMetadata | null>(null);
@@ -39,6 +49,55 @@ export const App: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Initialize and check current user session
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkAuth() {
+      try {
+        const user = await getCurrentUser();
+        if (isMounted) {
+          if (user && user.email) {
+            setCurrentUser({ id: user.id, email: user.email });
+          } else {
+            setCurrentUser(null);
+          }
+        }
+      } catch (err) {
+        console.error('Error verifying Supabase user session:', err);
+      } finally {
+        if (isMounted) setIsAuthChecking(false);
+      }
+    }
+
+    checkAuth();
+
+    // Listen to Supabase auth state changes
+    getSupabase().then((client) => {
+      if (!client || !isMounted) return;
+      const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+        if (!isMounted) return;
+        if (session?.user && session.user.email) {
+          setCurrentUser({ id: session.user.id, email: session.user.email });
+        } else {
+          setCurrentUser(null);
+          setPresets([]);
+          setJobs([]);
+          setAuthStatus(null);
+          setAiQuota(null);
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Capture beforeinstallprompt for PWA native install
   useEffect(() => {
@@ -65,28 +124,38 @@ export const App: React.FC = () => {
     }
   };
 
-  // Load initial data
+  // Load initial data for the authenticated user
   const loadInitialData = async () => {
     try {
-      const [presetsData, jobsData, authData] = await Promise.all([
+      const [presetsData, jobsData, authData, quotaData] = await Promise.all([
         ApiClient.getPresets(),
         ApiClient.getJobs(),
         ApiClient.getAuthStatus(),
+        ApiClient.getAIQuota().catch(() => null),
       ]);
       setPresets(presetsData);
       setJobs(jobsData);
       setAuthStatus(authData);
-    } catch (err) {
+      if (quotaData) setAiQuota(quotaData);
+    } catch (err: any) {
       console.error('Error loading initial app data:', err);
+      // If 401, session has expired
+      if (err.message && err.message.includes('401')) {
+        handleLogout();
+      }
     }
   };
 
   useEffect(() => {
-    loadInitialData();
-  }, []);
+    if (currentUser) {
+      loadInitialData();
+    }
+  }, [currentUser]);
 
   // Poll jobs when any job is in progress
   useEffect(() => {
+    if (!currentUser) return;
+
     const hasActiveJobs = jobs.some(
       (j) => j.overallStatus === 'in_progress' || j.overallStatus === 'queued'
     );
@@ -110,7 +179,21 @@ export const App: React.FC = () => {
         clearInterval(pollingRef.current);
       }
     };
-  }, [jobs]);
+  }, [jobs, currentUser]);
+
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+    } catch (err) {
+      console.warn('Logout notice:', err);
+    }
+    setCurrentUser(null);
+    setPresets([]);
+    setJobs([]);
+    setAuthStatus(null);
+    setAiQuota(null);
+    setActiveTab('create');
+  };
 
   const handleTogglePlatform = (platform: Platform) => {
     if (selectedPlatforms.includes(platform)) {
@@ -118,6 +201,12 @@ export const App: React.FC = () => {
     } else {
       setSelectedPlatforms([...selectedPlatforms, platform]);
     }
+  };
+
+  const handleAnalysisComplete = (result: AIAnalysisResult) => {
+    setAiResult(result);
+    // Refresh AI quota after analysis
+    ApiClient.getAIQuota().then(setAiQuota).catch(() => {});
   };
 
   const handlePublish = async (payloads: {
@@ -129,97 +218,191 @@ export const App: React.FC = () => {
     };
   }) => {
     if (!currentVideo) return;
-    setIsPublishing(true);
 
+    setIsPublishing(true);
     try {
-      const newJob = await ApiClient.publishJob({
+      const defaultYt = authStatus?.youtube.accounts?.find((a) => a.isDefault) || authStatus?.youtube.accounts?.[0];
+      const defaultIg = authStatus?.instagram.accounts?.find((a) => a.isDefault) || authStatus?.instagram.accounts?.[0];
+
+      const job = await ApiClient.publishJob({
         video: currentVideo,
         targetPlatforms: selectedPlatforms,
-        selectedAccounts: payloads.selectedAccounts,
+        selectedAccounts: {
+          youtubeAccountId: payloads.selectedAccounts?.youtubeAccountId || defaultYt?.id,
+          instagramAccountId: payloads.selectedAccounts?.instagramAccountId || defaultIg?.id,
+        },
         youtubePayload: payloads.youtubePayload,
         instagramPayload: payloads.instagramPayload,
       });
 
-      setJobs([newJob, ...jobs]);
-      // Switch to Queue tab to see real-time progress
+      setJobs([job, ...jobs]);
       setActiveTab('queue');
     } catch (err: any) {
-      alert(`Publish failed: ${err.message}`);
+      alert(`Publishing failed: ${err.message || 'Unknown error'}`);
     } finally {
       setIsPublishing(false);
     }
   };
+
+  // If initial auth verification is still checking
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-100">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 via-pink-600 to-amber-500 flex items-center justify-center shadow-xl shadow-indigo-500/20 mb-4 animate-bounce">
+          <span className="text-xl">⚡</span>
+        </div>
+        <div className="flex items-center space-x-2 text-slate-400 text-sm">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>Securing multi-user workspace...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // If user is not authenticated, show modern AuthScreen
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        onAuthSuccess={(user) => {
+          setCurrentUser({ id: user.id, email: user.email });
+        }}
+      />
+    );
+  }
 
   const activeJobsCount = jobs.filter(
     (j) => j.overallStatus === 'in_progress' || j.overallStatus === 'queued'
   ).length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-x-hidden w-full max-w-full">
-      {/* Navigation Header */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
+      {/* Top Header Navigation */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         authStatus={authStatus}
         activeJobsCount={activeJobsCount}
+        user={currentUser}
+        aiQuota={aiQuota}
         onRefreshAuth={loadInitialData}
         onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+        onLogout={handleLogout}
         isPwaInstallable={Boolean(deferredPrompt)}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-8 pb-20 sm:pb-8 space-y-6 sm:space-y-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8">
+        {/* TAB 1: Studio (Video Upload, Formatting & Publishing Flow) */}
         {activeTab === 'create' && (
-          <div className="space-y-6 sm:space-y-8 animate-fade-in w-full max-w-full">
-            {/* Step 1: Video Uploader & Platform Choice */}
-            <VideoUploader
-              onVideoUploaded={(video) => setCurrentVideo(video)}
-              selectedPlatforms={selectedPlatforms}
-              onTogglePlatform={handleTogglePlatform}
-              currentVideo={currentVideo}
-              onClearVideo={() => {
-                setCurrentVideo(null);
-                setAiResult(null);
-              }}
-              authStatus={authStatus}
-              onOpenAccounts={() => setActiveTab('accounts')}
-            />
-
-            {/* Step 2: Aspect Ratio Adjuster & Trimmer */}
-            {currentVideo && (
-              <VideoFormatStep
-                video={currentVideo}
+          <div className="space-y-6 sm:space-y-8">
+            {/* Step 1: Video Upload */}
+            <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-6 backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-white flex items-center space-x-2">
+                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-xs flex items-center justify-center text-white">1</span>
+                    <span>Upload Video</span>
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                    Upload your video file (up to 1GB). Automatically stored in your private folder.
+                  </p>
+                </div>
+              </div>
+              <VideoUploader
+                currentVideo={currentVideo}
+                onVideoUploaded={(video) => setCurrentVideo(video)}
+                onClearVideo={() => {
+                  setCurrentVideo(null);
+                  setAiResult(null);
+                }}
                 selectedPlatforms={selectedPlatforms}
-                onFormatApplied={(formattedVideo) => setCurrentVideo(formattedVideo)}
-              />
-            )}
-
-            {/* Step 3: Gemini AI Analysis with Search Grounding */}
-            {currentVideo && (
-              <AIAnalysisCard
-                video={currentVideo}
-                onAnalysisComplete={(result) => setAiResult(result)}
-                analysisResult={aiResult}
-                trendContext={trendContext}
-              />
-            )}
-
-            {/* Step 4: Review, Edit & Publish */}
-            {currentVideo && (
-              <MetadataReview
-                selectedPlatforms={selectedPlatforms}
-                aiResult={aiResult}
-                onPublish={handlePublish}
-                isPublishing={isPublishing}
-                presets={presets}
+                onTogglePlatform={handleTogglePlatform}
                 authStatus={authStatus}
                 onOpenAccounts={() => setActiveTab('accounts')}
-                trendContext={trendContext}
               />
+            </section>
+
+            {/* Step 2: Aspect Ratio & Trimming */}
+            {currentVideo && (
+              <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-6 backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-white flex items-center space-x-2">
+                      <span className="w-6 h-6 rounded-full bg-indigo-600 text-xs flex items-center justify-center text-white">2</span>
+                      <span>Format & Trim for Platforms</span>
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                      Optimize aspect ratio (9:16 Shorts/Reels, 1:1, 4:5, 16:9) with intelligent blur or crop.
+                    </p>
+                  </div>
+                </div>
+                <VideoFormatStep
+                  video={currentVideo}
+                  selectedPlatforms={selectedPlatforms}
+                  onFormatApplied={(formattedVideo) => setCurrentVideo(formattedVideo)}
+                />
+              </section>
+            )}
+
+            {/* Step 3: AI Trend Research & Metadata Optimization */}
+            {currentVideo && (
+              <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-6 backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-white flex items-center space-x-2">
+                      <span className="w-6 h-6 rounded-full bg-indigo-600 text-xs flex items-center justify-center text-white">3</span>
+                      <span>AI Trend Analysis & Search Grounding</span>
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                      Discover real-time search trends and craft viral titles, hashtags, and descriptions.
+                    </p>
+                  </div>
+                  {aiQuota && (
+                    <div className="text-xs text-indigo-400 bg-indigo-950/60 border border-indigo-800/40 px-2.5 py-1 rounded-lg hidden sm:flex items-center space-x-1">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{aiQuota.remainingAnalyses} analyses left today</span>
+                    </div>
+                  )}
+                </div>
+                <AIAnalysisCard
+                  video={currentVideo}
+                  analysisResult={aiResult}
+                  trendContext={trendContext}
+                  onAnalysisComplete={handleAnalysisComplete}
+                />
+              </section>
+            )}
+
+            {/* Step 4: Metadata Review & Multi-Platform Publish */}
+            {currentVideo && aiResult && (
+              <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-6 backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-white flex items-center space-x-2">
+                      <span className="w-6 h-6 rounded-full bg-indigo-600 text-xs flex items-center justify-center text-white">4</span>
+                      <span>Review & Publish</span>
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                      Preview platform mockups, refine keywords, and publish simultaneously to YouTube & Instagram.
+                    </p>
+                  </div>
+                </div>
+                <MetadataReview
+                  selectedPlatforms={selectedPlatforms}
+                  aiResult={aiResult}
+                  presets={presets}
+                  authStatus={authStatus}
+                  onOpenAccounts={() => setActiveTab('accounts')}
+                  trendContext={trendContext}
+                  onPublish={handlePublish}
+                  isPublishing={isPublishing}
+                />
+              </section>
             )}
           </div>
         )}
 
+        {/* TAB 2: Trend Finder */}
         {activeTab === 'trends' && (
           <TrendsView
             onUseTrendInStudio={(topic, hashtags) => {
@@ -229,20 +412,15 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'accounts' && (
-          <AccountsView
-            authStatus={authStatus}
-            onRefresh={loadInitialData}
-          />
-        )}
-
+        {/* TAB 3: Presets Manager */}
         {activeTab === 'presets' && (
           <PresetsManager
             presets={presets}
-            onPresetsUpdated={(updated) => setPresets(updated)}
+            onPresetsUpdated={(newPresets) => setPresets(newPresets)}
           />
         )}
 
+        {/* TAB 4: Queue & Publishing History */}
         {activeTab === 'queue' && (
           <JobQueueView
             jobs={jobs}
@@ -253,6 +431,15 @@ export const App: React.FC = () => {
           />
         )}
 
+        {/* TAB 5: Connected Accounts Management */}
+        {activeTab === 'accounts' && (
+          <AccountsView
+            authStatus={authStatus}
+            onRefresh={loadInitialData}
+          />
+        )}
+
+        {/* TAB 6: Settings Modal (Rendered inline when tab is selected) */}
         {activeTab === 'settings' && (
           <PlatformSettingsModal
             authStatus={authStatus}
@@ -261,8 +448,8 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Sticky Bottom Tab Bar (Visible under 640px) */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 flex items-center justify-around">
+      {/* Mobile Floating Bottom Bar */}
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 border-t border-slate-800/80 backdrop-blur-lg flex items-center justify-around py-1.5 px-2">
         {/* Studio Tab */}
         <button
           type="button"
@@ -275,7 +462,7 @@ export const App: React.FC = () => {
           <span className="text-[10px] mt-0.5">Studio</span>
         </button>
 
-        {/* Trends Tab (Separate bottom tab next to Studio) */}
+        {/* Trends Tab */}
         <button
           type="button"
           onClick={() => setActiveTab('trends')}

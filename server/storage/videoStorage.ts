@@ -18,6 +18,7 @@ if (!fs.existsSync(CHUNKS_DIR)) {
 
 interface ResumableSession {
   id: string;
+  userId?: string;
   originalName: string;
   totalSize: number;
   mimeType: string;
@@ -57,6 +58,7 @@ export class VideoStorageService {
     originalName: string;
     totalSize: number;
     mimeType: string;
+    userId?: string;
   }): Promise<{
     sessionId: string;
     uploadUrl: string;
@@ -70,13 +72,14 @@ export class VideoStorageService {
     const ext = path.extname(params.originalName) || '.mp4';
     const fileName = `${id}${ext}`;
 
-    // 1. Supabase Storage (Free tier, public bucket with signed upload URLs)
+    // 1. Supabase Storage (Free tier, public bucket with signed upload URLs under user folder)
     if (SupabaseService.isConfigured()) {
       try {
-        const supabaseSession = await SupabaseService.createSignedUploadUrl(fileName);
+        const supabaseSession = await SupabaseService.createSignedUploadUrl(fileName, params.userId);
         if (supabaseSession) {
           this.sessions.set(id, {
             id,
+            userId: params.userId,
             originalName: params.originalName,
             totalSize: params.totalSize,
             mimeType: params.mimeType,

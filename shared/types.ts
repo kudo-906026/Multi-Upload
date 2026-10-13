@@ -6,6 +6,7 @@ export type AITone = 'viral_hook' | 'informative' | 'casual' | 'storytelling' | 
 
 export interface PlatformPreset {
   id: string;
+  userId?: string;
   platform: Platform;
   name: string;
   fixedHashtags: string[];
@@ -177,6 +178,7 @@ export interface InstagramPublishPayload {
 
 export interface ConnectedAccount {
   id: string;
+  userId?: string;
   platform: Platform;
   name: string; // YouTube Channel Name or Instagram Name/Username
   handle?: string; // @handle or @username
@@ -191,6 +193,7 @@ export interface ConnectedAccount {
 
 export interface PublishJob {
   id: string;
+  userId?: string;
   video: VideoMetadata;
   targetPlatforms: Platform[];
   selectedAccounts?: {
@@ -208,6 +211,25 @@ export interface PublishJob {
   createdAt: string;
   completedAt?: string;
   overallStatus: 'queued' | 'in_progress' | 'completed' | 'partial_failure' | 'failed';
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  fullName?: string;
+  avatarUrl?: string;
+}
+
+export interface AIUsageQuota {
+  analyzeUsedToday: number;
+  analyzeDailyLimit: number;
+  trendUsedToday: number;
+  trendDailyLimit: number;
+  keywordsUsedToday: number;
+  keywordsDailyLimit: number;
+  remainingAnalyses: number;
+  remainingTrends: number;
+  remainingKeywords: number;
 }
 
 export interface PlatformAuthStatus {
@@ -242,3 +264,4 @@ export interface ApiResponse<T> {
   error?: string;
   message?: string;
 }
+
