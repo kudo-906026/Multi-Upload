@@ -52,10 +52,12 @@ export const PlatformSettingsModal: React.FC<PlatformSettingsModalProps> = ({
 
   const sampleEnv = `# Environment Variables (.env) for Render & Supabase (Free Tier)
 PORT=10000
+NODE_ENV=production
 PUBLIC_BASE_URL=https://your-app-name.onrender.com
 
-# 1. Supabase (Database & Video Storage)
+# 1. Supabase (Database, Auth & Video Storage)
 SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SECRET_KEY=your_supabase_secret_key
 SUPABASE_STORAGE_BUCKET=videos
 
@@ -90,7 +92,7 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
           </h1>
           <p className="text-xs text-slate-400 mt-1">
             All API secrets and OAuth refresh tokens are stored safely on the backend server environment
-            variables and are never exposed to the frontend browser.
+            variables and are never exposed to the frontend browser. Each user connects and manages their own accounts.
           </p>
         </div>
 
@@ -120,9 +122,9 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
                   Connected
                 </span>
               ) : (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" />
-                  Test Simulation
+                  Not Connected
                 </span>
               )}
             </div>
@@ -131,7 +133,7 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
               <div className="flex justify-between">
                 <span className="text-slate-400">Channel:</span>
                 <span className="font-semibold text-white">
-                  {authStatus?.youtube.channelTitle || 'Verified Creator Channel'}
+                  {authStatus?.youtube.channelTitle || 'No channel connected'}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -175,9 +177,9 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
                   Connected
                 </span>
               ) : (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" />
-                  Test Simulation
+                  Not Connected
                 </span>
               )}
             </div>
@@ -186,19 +188,23 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
               <div className="flex justify-between">
                 <span className="text-slate-400">Account Handle:</span>
                 <span className="font-semibold text-white">
-                  {authStatus?.instagram.username || '@creator_reels'}
+                  {authStatus?.instagram.username || 'No account connected'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Long-Lived Token:</span>
                 <span
                   className={`font-semibold ${
-                    (authStatus?.instagram.tokenDaysRemaining ?? 60) < 15
+                    !authStatus?.instagram.authenticated
+                      ? 'text-slate-400'
+                      : (authStatus?.instagram.tokenDaysRemaining ?? 60) < 15
                       ? 'text-amber-400'
                       : 'text-emerald-400'
                   }`}
                 >
-                  {authStatus?.instagram.tokenDaysRemaining ?? 60} Days Remaining
+                  {authStatus?.instagram.authenticated
+                    ? `${authStatus.instagram.tokenDaysRemaining ?? 60} Days Remaining`
+                    : 'Not Connected'}
                 </span>
               </div>
               <div className="flex justify-between">

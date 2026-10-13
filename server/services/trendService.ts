@@ -32,7 +32,12 @@ export class TrendService {
    * Fetches trending topics, formats, audio, and hashtags for a niche and region.
    * Caches results for 1 hour.
    */
-  static async getNicheTrends(niche: string, region: string = 'US', forceRefresh: boolean = false): Promise<NicheTrendReport> {
+  static async getNicheTrends(
+    niche: string,
+    region: string = 'US',
+    forceRefresh: boolean = false,
+    userId?: string
+  ): Promise<NicheTrendReport> {
     const cacheKey = `${niche.trim().toLowerCase()}_${region.trim().toUpperCase()}`;
 
     if (!forceRefresh) {
@@ -45,8 +50,8 @@ export class TrendService {
 
     console.log(`[TrendService] Generating fresh trend report for niche="${niche}", region="${region}"...`);
 
-    // 1. Fetch YouTube trending videos for this niche/region (if possible)
-    const ytTrending = await this.fetchYouTubeTrending(niche, region);
+    // 1. Fetch YouTube trending videos for this niche/region (if user connected YouTube)
+    const ytTrending = await this.fetchYouTubeTrending(niche, region, userId);
 
     // 2. Fetch Gemini search-grounded viral trends
     const geminiTrends = await this.fetchGeminiGroundedTrends(niche, region, ytTrending);
@@ -73,21 +78,23 @@ export class TrendService {
   /**
    * Queries YouTube Data API v3 for chart=mostPopular in the specified category & region.
    */
-  private static async fetchYouTubeTrending(niche: string, region: string): Promise<any[]> {
+  private static async fetchYouTubeTrending(niche: string, region: string, userId?: string): Promise<any[]> {
     const catId = this.NICHE_YOUTUBE_CATEGORY[niche.toLowerCase()] || '0';
 
     try {
-      // Try using authenticated YouTube client or public API key
-      const defaultYt = AccountStorageService.getDefaultAccountTokens<YouTubeTokens>('youtube');
+      // If user has connected their YouTube account, use their OAuth credentials
+      const userYt = userId
+        ? AccountStorageService.getDefaultAccountTokens<YouTubeTokens>(userId, 'youtube')
+        : null;
       let authClient: any = null;
 
-      if (defaultYt?.tokens?.refreshToken && config.google.clientId && config.google.clientSecret) {
+      if (userYt?.tokens?.refreshToken && config.google.clientId && config.google.clientSecret) {
         const oauth2Client = new google.auth.OAuth2(
           config.google.clientId,
           config.google.clientSecret,
           config.google.redirectUri
         );
-        oauth2Client.setCredentials({ refresh_token: defaultYt.tokens.refreshToken });
+        oauth2Client.setCredentials({ refresh_token: userYt.tokens.refreshToken });
         authClient = oauth2Client;
       }
 

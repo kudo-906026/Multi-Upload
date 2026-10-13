@@ -1,260 +1,132 @@
 # OmniPost Video ⚡
 
-> Production-quality multi-platform video publisher for **YouTube Shorts** and **Instagram Reels** with **Gemini AI & Google Search Grounding**.
-> **100% Free Hosting**: Powered by **Supabase** (Database & Storage) and **Render** (Free Web Service with FFmpeg) — **No Google Cloud billing or paid subscriptions required!**
-
-Upload video formats (MP4, MOV, WebM, MKV, AVI, etc.) directly to Supabase Storage using signed upload URLs, format aspect ratios (9:16, 1:1, 4:5, 16:9), analyze trends with Gemini Search Grounding, preview platform mockups, generate smart SEO keywords and Instagram alt-text, and publish seamlessly to YouTube and Instagram Reels with automatic post-publish cleanup.
+A multi-platform video publishing studio for **YouTube Shorts** and **Instagram Reels** with **Gemini AI & Google Search Grounding**.
 
 ---
 
-## 🚀 Free Deployment Guide (Supabase + Render)
+## User Guide
 
-You can run and host the entire application **100% free** without any credit card or Google Cloud billing by combining:
-1. **Supabase (Free Tier)**: For storing OAuth account tokens and temporary video files with signed upload URLs.
-2. **Render (Free Web Service)**: For running the Dockerized Node.js/Express + React application with FFmpeg pre-installed.
-3. **Google AI Studio (Free Tier)**: For Gemini API key with Google Search Grounding.
-
----
-
-### Step 1: Set Up Supabase (Database & Storage)
-
-1. Create a free account at [Supabase](https://supabase.com/) and create a **New Project**.
-2. **Create the Public Storage Bucket**:
-   - In your project sidebar, click **Storage** -> **New Bucket**.
-   - Name the bucket: `videos`
-   - Toggle **Public bucket** to **ON** (required so Meta Graph API can fetch video files for Instagram Reels).
-   - Under **Additional Configuration**, set **Allowed MIME types** to `video/*` and maximum file size to `1073741824` (1 GB).
-   - Click **Save**.
-3. **Run the Multi-User Database & Security Rules Script**:
-   - In your Supabase project sidebar, click **SQL Editor** -> **New query**.
-   - Paste and run the complete script from **`supabase_schema.sql`** (or below):
-
-   ```sql
-   -- 1. Connected Accounts (isolated by user_id)
-   CREATE TABLE IF NOT EXISTS public.connected_accounts (
-     id TEXT PRIMARY KEY,
-     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-     platform TEXT NOT NULL,
-     name TEXT NOT NULL,
-     handle TEXT,
-     avatar_url TEXT,
-     platform_account_id TEXT NOT NULL,
-     connected_at TIMESTAMPTZ DEFAULT NOW(),
-     expires_at TIMESTAMPTZ,
-     is_default BOOLEAN DEFAULT false,
-     encrypted_tokens JSONB NOT NULL
-   );
-
-   -- 2. Platform Presets (isolated by user_id)
-   CREATE TABLE IF NOT EXISTS public.presets (
-     id TEXT PRIMARY KEY,
-     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-     platform TEXT NOT NULL,
-     name TEXT NOT NULL,
-     fixed_hashtags JSONB DEFAULT '[]'::jsonb,
-     description_footer TEXT DEFAULT '',
-     category TEXT DEFAULT '28',
-     privacy TEXT DEFAULT 'public',
-     tone TEXT DEFAULT 'viral_hook',
-     share_to_feed BOOLEAN DEFAULT true,
-     updated_at TIMESTAMPTZ DEFAULT NOW(),
-     CONSTRAINT presets_user_platform_unique UNIQUE (user_id, platform)
-   );
-
-   -- 3. Publishing Jobs (isolated by user_id)
-   CREATE TABLE IF NOT EXISTS public.jobs (
-     id TEXT PRIMARY KEY,
-     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-     overall_status TEXT NOT NULL,
-     target_platforms JSONB NOT NULL,
-     video JSONB NOT NULL,
-     selected_accounts JSONB,
-     metadata JSONB NOT NULL,
-     platform_results JSONB NOT NULL,
-     created_at TIMESTAMPTZ DEFAULT NOW(),
-     completed_at TIMESTAMPTZ
-   );
-
-   -- 4. History (isolated by user_id)
-   CREATE TABLE IF NOT EXISTS public.history (
-     id TEXT PRIMARY KEY,
-     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-     job_id TEXT REFERENCES public.jobs(id) ON DELETE SET NULL,
-     platform TEXT NOT NULL,
-     title TEXT NOT NULL,
-     url TEXT,
-     external_id TEXT,
-     published_at TIMESTAMPTZ DEFAULT NOW(),
-     details JSONB
-   );
-
-   -- 5. AI Usage & Rate Limiting (isolated by user_id)
-   CREATE TABLE IF NOT EXISTS public.user_ai_usage (
-     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-     usage_date DATE NOT NULL,
-     analyze_count INT DEFAULT 0,
-     trend_count INT DEFAULT 0,
-     keywords_count INT DEFAULT 0,
-     last_request_at TIMESTAMPTZ DEFAULT NOW(),
-     PRIMARY KEY (user_id, usage_date)
-   );
-
-   -- Enable Row Level Security (RLS) on all tables (No USING (true) policies)
-   ALTER TABLE public.connected_accounts ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE public.presets ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE public.history ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE public.user_ai_usage ENABLE ROW LEVEL SECURITY;
-
-   -- Zero-Trust User Isolation Policies
-   CREATE POLICY "Users can only view their own accounts" ON public.connected_accounts FOR SELECT TO authenticated USING (auth.uid() = user_id);
-   CREATE POLICY "Users can only insert their own accounts" ON public.connected_accounts FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only update their own accounts" ON public.connected_accounts FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only delete their own accounts" ON public.connected_accounts FOR DELETE TO authenticated USING (auth.uid() = user_id);
-
-   CREATE POLICY "Users can only view their own presets" ON public.presets FOR SELECT TO authenticated USING (auth.uid() = user_id);
-   CREATE POLICY "Users can only insert their own presets" ON public.presets FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only update their own presets" ON public.presets FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only delete their own presets" ON public.presets FOR DELETE TO authenticated USING (auth.uid() = user_id);
-
-   CREATE POLICY "Users can only view their own jobs" ON public.jobs FOR SELECT TO authenticated USING (auth.uid() = user_id);
-   CREATE POLICY "Users can only insert their own jobs" ON public.jobs FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only update their own jobs" ON public.jobs FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only delete their own jobs" ON public.jobs FOR DELETE TO authenticated USING (auth.uid() = user_id);
-
-   CREATE POLICY "Users can only view their own history" ON public.history FOR SELECT TO authenticated USING (auth.uid() = user_id);
-   CREATE POLICY "Users can only insert their own history" ON public.history FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "Users can only delete their own history" ON public.history FOR DELETE TO authenticated USING (auth.uid() = user_id);
-
-   CREATE POLICY "Users can only view their own AI usage" ON public.user_ai_usage FOR SELECT TO authenticated USING (auth.uid() = user_id);
-   CREATE POLICY "Users can only update their own AI usage" ON public.user_ai_usage FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-   ```
-
-4. **Copy your API Credentials**:
-   - Go to **Project Settings** (gear icon) -> **API**.
-   - Copy **Project URL** (`https://<project-ref>.supabase.co`).
-   - Copy **`anon` Public Key** (used for browser user auth).
-   - Copy **`service_role` Secret Key** (used by backend only).
+### 1. Sign Up & Log In
+1. Open the application in your browser.
+2. If you don't have an account, click **"Sign up"** and enter your email and a password (minimum 6 characters), or click **"Sign in with Google"**.
+3. Once logged in, your session is saved automatically.
+4. If you ever forget your password, click **"Forgot password?"** on the login screen to receive a password reset link by email.
+5. You can log out anytime using the **Logout** button in the top navigation bar.
 
 ---
 
-### Step 2: Deploy to Render (Free Web Service with FFmpeg)
+### 2. Connect Your YouTube & Instagram Accounts
+Each user manages their own independent accounts. Your tokens are encrypted and never shared with other users.
 
-Render provides free Docker hosting and automatically assigns an HTTPS URL (`https://<your-app-name>.onrender.com`).
+#### Connecting YouTube (Google):
+1. Navigate to the **Accounts** tab in the navigation bar.
+2. Click **"Connect YouTube Channel"**.
+3. You will be redirected to Google's sign-in page. Select the Google account that manages your YouTube channel.
+4. Allow permissions for YouTube video uploads (`youtube.upload`).
+5. After authorizing, you will be redirected back to the app with your YouTube channel name and avatar connected.
 
-#### Option A: 1-Click Blueprint (Recommended)
-1. Fork or push this repository to your **GitHub** account.
-2. In the [Render Dashboard](https://dashboard.render.com/), click **New +** -> **Blueprint**.
-3. Select your repository. Render will automatically detect `render.yaml`.
-4. Enter the required environment variables when prompted and click **Apply**.
+#### Connecting Instagram (Meta):
+1. Navigate to the **Accounts** tab in the navigation bar.
+2. Click **"Connect Instagram Account"**.
+3. **Important Requirements**:
+   - Your Instagram account **must be a Professional Account** (Creator or Business). Personal Instagram accounts cannot publish Reels via the Instagram Graph API. To switch, open the Instagram mobile app -> **Settings** -> **Account Type and Tools** -> **Switch to Professional Account**.
+   - If the Meta developer app is currently in **Development Mode**, your Facebook/Instagram user account must be added as a **Tester** or **Developer** under the Meta App Dashboard (**App Roles** -> **Roles** -> **Add Testers**), and you must accept the invitation at [developers.facebook.com/requests](https://developers.facebook.com/requests).
+4. Authorize the requested permissions (`instagram_basic`, `instagram_content_publish`).
+5. After authorizing, your Instagram handle will appear under Connected Accounts.
+6. Instagram tokens remain valid for 60 days. You can refresh your token at any time by clicking **"Refresh Token"** on the Accounts page.
 
-#### Option B: Manual Web Service Setup
-1. In the [Render Dashboard](https://dashboard.render.com/), click **New +** -> **Web Service**.
-2. Connect your GitHub repository.
-3. Configure the service settings:
-   - **Name**: `omnipost-video` (or your preferred name)
-   - **Region**: Choose the closest region (e.g., Oregon, Frankfurt, Singapore)
-   - **Runtime**: **Docker** (Render will build `Dockerfile` which includes `ffmpeg` and Node.js 22)
-   - **Instance Type**: **Free**
-4. Under **Environment Variables**, add:
+---
 
-| Key | Value / Description |
+### 3. Using the Video Studio
+
+#### Step 1: Upload Video
+- Drag and drop or browse any video file (MP4, MOV, WebM, MKV, AVI, etc., up to 1GB).
+- Your file is uploaded into your private, isolated user folder on cloud storage.
+
+#### Step 2: Format & Trim
+- **Aspect Ratio**: Convert your video to vertical format (9:16 Shorts/Reels), Square (1:1), Portrait feed (4:5), or Widescreen (16:9).
+- **Background Styling**: Choose intelligent Gaussian Blur padding, Center Crop, or Scale to Fit.
+- **Trimming**: Set start and end points to keep your video within platform duration limits.
+
+#### Step 3: AI Trend Analysis & SEO
+- Enter an optional niche, topic, or focus keyword.
+- Click **"Analyze with Gemini AI"**. Gemini uses real-time Google Search Grounding to find currently trending keywords and generates:
+  - Viral titles optimized for high click-through rates.
+  - SEO-rich descriptions and platform-specific hashtags.
+  - YouTube search tags and Instagram accessibility alt-text.
+
+#### Step 4: Review & Multi-Platform Publish
+- Preview live mockups showing how your video will look on YouTube Shorts and Instagram Reels.
+- Fine-tune captions, privacy status (Public, Unlisted, Private), and select which accounts to post to.
+- Click **"Publish"** to begin simultaneous background publishing.
+- **Automatic Cleanup**: As soon as posting completes, the master video file is automatically deleted from cloud storage to protect your privacy and prevent storage clutter.
+
+---
+
+### 4. Platform Presets
+Under the **Presets** tab, configure reusable defaults per platform:
+- **Fixed Hashtags**: Hashtags that are automatically added to every post (e.g., `#shorts #reels #creator`).
+- **Description Footer**: Standard signature text (e.g., links to your website, merchandise, or social handles).
+- **Default Privacy & Category**: Pre-select your preferred YouTube category and visibility.
+
+---
+
+### 5. Trends Tab
+- Browse viral topics, breakout keywords, and popular audio across niches (Tech, Gaming, Fitness, Food, Finance, Lifestyle, etc.) and regions.
+- Click **"Use in Studio"** on any trend to immediately start a new video project seeded with that topic.
+
+---
+
+### 6. Queue & Publishing History
+- The **Queue** tab monitors live publishing jobs, displaying real-time progress for transcoding, container generation, and platform status.
+- Once completed, view direct clickable links to your published YouTube Short or Instagram Reel.
+
+---
+
+### 7. Troubleshooting
+
+- **"No connected account found"**: Make sure you have connected your YouTube channel or Instagram account under the **Accounts** tab before clicking Publish.
+- **Instagram "Media container creation failed"**: Verify that your Instagram account is a Creator or Business account, and that your video is an accepted format (MP4/MOV with H.264 video and AAC audio).
+- **Instagram "App Not Active / Feature Unavailable"**: While the Meta developer app is in Development Mode, only approved testers can connect. Ensure your account is added under **App Roles -> Testers** in the Meta Developer Console.
+- **Too Many AI Requests (HTTP 429)**: Each user has a generous daily quota (20 analyses, 30 trend searches per day) and a rate limit of 10 requests per minute to protect the shared Gemini API capacity. Quotas reset daily at 00:00 UTC.
+
+---
+
+## Deployment (Developers Only)
+
+To host this multi-user application on Render with Supabase:
+
+### Environment Variables
+
+Configure these variables in your **Render Web Service Dashboard** (under **Environment**):
+
+| Variable Name | Purpose |
 | :--- | :--- |
-| `NODE_ENV` | `production` |
-| `SUPABASE_URL` | Your Supabase Project URL (`https://<project-ref>.supabase.co`) |
-| `SUPABASE_ANON_KEY` | Your Supabase `anon` public key (for user sign-in/up) |
-| `SUPABASE_SECRET_KEY` | Your Supabase `service_role` / Secret API key (or `SUPABASE_SERVICE_ROLE_KEY`) |
-| `SUPABASE_STORAGE_BUCKET` | `videos` |
-| `GEMINI_API_KEY` | Your free Gemini API key from [Google AI Studio](https://aistudio.google.com/) |
-| `GOOGLE_CLIENT_ID` | Your Google OAuth Client ID (from Google Cloud Console) |
-| `GOOGLE_CLIENT_SECRET` | Your Google OAuth Client Secret |
-| `META_APP_ID` | Your Meta Developer App ID (Instagram Graph API) |
-| `META_APP_SECRET` | Your Meta Developer App Secret |
-| `TOKEN_ENCRYPTION_KEY` | Any random 32+ character string (for AES-256-GCM token encryption & OAuth state signing) |
+| `NODE_ENV` | Set to `production` |
+| `PORT` | Set to `10000` (Render provides this default) |
+| `PUBLIC_BASE_URL` | Your public HTTPS service URL (e.g., `https://your-app-name.onrender.com`) |
+| `SUPABASE_URL` | Your Supabase project URL (`https://<project-ref>.supabase.co`) |
+| `SUPABASE_ANON_KEY` | Supabase Anon Public Key (used for client-side authentication) |
+| `SUPABASE_PUBLISHABLE_KEY` | Alternative name for `SUPABASE_ANON_KEY` (supported by the client) |
+| `SUPABASE_SECRET_KEY` | Supabase Service Role Secret Key (used strictly by the backend) |
+| `SUPABASE_STORAGE_BUCKET` | Public storage bucket name for temporary video uploads (default: `videos`) |
+| `GEMINI_API_KEY` | Google Gemini API key from Google AI Studio |
+| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID (YouTube Data API v3) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 Client Secret |
+| `META_APP_ID` | Meta App ID from Meta for Developers (Instagram Graph API) |
+| `META_APP_SECRET` | Meta App Secret |
+| `TOKEN_ENCRYPTION_KEY` | A random string (minimum 32 characters) for AES-256-GCM token encryption |
 
-*(Note: Render automatically injects `PORT=10000` and `RENDER_EXTERNAL_URL`. The app dynamically binds to `process.env.PORT` on `0.0.0.0` and uses `RENDER_EXTERNAL_URL` if `PUBLIC_BASE_URL` is omitted).*
+### OAuth Redirect URIs
 
-5. Click **Create Web Service**. Render will build the container, install FFmpeg, compile the client and server, and make your app live!
+Add these exact URIs in your developer consoles:
 
----
+- **Google Cloud Console** (APIs & Services -> Credentials -> Authorized redirect URIs):
+  ```
+  https://<your-app-name>.onrender.com/api/auth/youtube/callback
+  ```
 
-### Step 3: Exact OAuth Redirect URIs to Register
-
-To connect YouTube channels and Instagram accounts in-app, register the exact callback URIs in your developer portals using your Render domain (`https://<your-app-name>.onrender.com`):
-
-| Platform | Developer Portal | Exact Authorized Redirect URI | Required Scopes |
-| :--- | :--- | :--- | :--- |
-| **YouTube** | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | `https://<your-app-name>.onrender.com/api/auth/youtube/callback`<br/>*(or `http://localhost:8080/api/auth/youtube/callback`)* | `youtube.upload`<br/>`youtube.readonly`<br/>`userinfo.profile` |
-| **Instagram** | [Meta for Developers](https://developers.facebook.com/apps) | `https://<your-app-name>.onrender.com/api/auth/instagram/callback`<br/>*(or `http://localhost:8080/api/auth/instagram/callback`)* | `instagram_basic`<br/>`instagram_content_publish`<br/>`pages_show_list`<br/>`pages_read_engagement` |
-
-#### 1. YouTube Data API Setup (Free Google Cloud Project)
-*(Google Cloud Projects are free and do not require billing for standard YouTube Data API v3 quota)*:
-1. Open [Google Cloud Console](https://console.cloud.google.com/) and create a project.
-2. Go to **APIs & Services** -> **Library** -> Search and enable **YouTube Data API v3**.
-3. Go to **OAuth consent screen**:
-   - User Type: **External**
-   - Fill in App name & developer email.
-   - Add scopes:
-     - `https://www.googleapis.com/auth/youtube.upload`
-     - `https://www.googleapis.com/auth/youtube.readonly`
-     - `https://www.googleapis.com/auth/userinfo.profile`
-   - Under **Test users**, add your Google email address.
-4. Go to **Credentials** -> **Create Credentials** -> **OAuth client ID**:
-   - Application type: **Web application**
-   - Name: `OmniPost Video Client`
-   - **Authorized redirect URIs**:
-     - `https://<your-app-name>.onrender.com/api/auth/youtube/callback`
-     - `http://localhost:8080/api/auth/youtube/callback` (for local development)
-5. Copy **Client ID** and **Client Secret** into your Render environment variables.
-
-#### 2. Instagram Graph API Setup (Free Meta Developer Account)
-1. Open [Meta for Developers](https://developers.facebook.com/) and create a free App.
-2. Select App Type: **Business** or **Other**.
-3. Under Add products, add **Instagram Graph API** / **Instagram**.
-4. Go to **Instagram** / **Facebook Login** -> **Settings**:
-   - Under **Valid OAuth Redirect URIs**, enter:
-     - `https://<your-app-name>.onrender.com/api/auth/instagram/callback`
-     - `http://localhost:8080/api/auth/instagram/callback` (for local development)
-5. In App **Settings** -> **Basic**, copy your **App ID** and **App Secret**.
-6. Ensure your Instagram account is an **Instagram Professional (Business or Creator)** account linked to a Facebook Page.
-
----
-
-## 🔄 Direct Supabase Upload & Auto-Delete Lifecycle
-
-1. **Direct Signed Upload**: When selecting a video, the browser asks the backend for a signed upload URL (`POST /api/upload/resumable/init`). The backend generates a signed URL with Supabase Storage.
-2. **Zero Backend Bandwidth**: The browser uploads the raw video bytes directly to Supabase via HTTP `PUT`. The Render server never receives the raw video upload stream, saving CPU, RAM, and bandwidth.
-3. **Public URL with Byte-Ranges**: Supabase Storage provides a public URL with native HTTP Byte-Range support, allowing Meta's servers to ingest the video directly when publishing Instagram Reels.
-4. **Automatic Post-Publish Deletion**: As soon as publishing to YouTube and/or Instagram completes, `JobQueueService` automatically calls `VideoStorageService.deleteVideoAfterPosting()`. This deletes the video file from Supabase Storage and clears temporary cache on disk, preventing storage accumulation and keeping you safely within the free tier.
-
----
-
-## 📱 Mobile & PWA Installation
-
-OmniPost Video includes a built-in **Progressive Web App (PWA)** and **Capacitor Android** configuration:
-- **PWA on Android / iOS / Desktop**: Tap **Install App** in your browser toolbar or header to run full-screen as a standalone native app.
-- **Android APK**: Automated GitHub Actions workflow `.github/workflows/build-android-apk.yml` builds debug APKs directly in your GitHub Actions tab.
-
----
-
-## 💻 Local Development
-
-```bash
-# 1. Clone repository
-git clone <your-repo-url>
-cd omnipost-video
-
-# 2. Install dependencies
-npm install
-
-# 3. Copy environment template
-cp .env.example .env
-# Edit .env with your Supabase, Gemini, and OAuth credentials
-
-# 4. Start local development server (Express + Vite HMR on port 8080)
-npm run dev
-
-# 5. Build for production test
-npm run build
-npm start
-```
+- **Meta Developer Portal** (Instagram Login / Facebook Login -> Settings -> Valid OAuth Redirect URIs):
+  ```
+  https://<your-app-name>.onrender.com/api/auth/instagram/callback
+  ```

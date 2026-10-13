@@ -309,33 +309,20 @@ export class AccountStorageService {
 
   /**
    * Returns the primary or default account for a given platform and user.
+   * Strictly scopes by userId to prevent any cross-user account leakage.
    */
   static getDefaultAccountTokens<T = any>(
-    param1: string,
-    param2?: Platform
+    userId: string,
+    platform: Platform
   ): { account: ConnectedAccount; tokens: T } | null {
-    let list: StoredAccountRecord[];
-    let effectiveUserId: string;
-
-    if (param2) {
-      // Called as (userId, platform)
-      effectiveUserId = param1;
-      list = Array.from(this.accounts.values()).filter(
-        (a) => a.userId === param1 && a.platform === param2
-      );
-    } else {
-      // Called as (platform)
-      list = Array.from(this.accounts.values()).filter(
-        (a) => a.platform === (param1 as Platform)
-      );
-      if (list.length === 0) return null;
-      effectiveUserId = list[0].userId;
-    }
-
+    if (!userId) return null;
+    const list = Array.from(this.accounts.values()).filter(
+      (a) => a.userId === userId && a.platform === platform
+    );
     if (list.length === 0) return null;
 
     const selected = list.find((a) => a.isDefault) || list[0];
-    return this.getAccountTokens<T>(selected.userId, selected.id);
+    return this.getAccountTokens<T>(userId, selected.id);
   }
 
   /**

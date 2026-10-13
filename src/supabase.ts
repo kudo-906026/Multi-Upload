@@ -18,7 +18,11 @@ export async function getSupabase(): Promise<SupabaseClient | null> {
 
   initPromise = (async () => {
     let url = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-    let anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    let anonKey = (
+      import.meta.env.VITE_SUPABASE_ANON_KEY ||
+      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      ''
+    ).trim();
 
     if (!url || !anonKey) {
       try {

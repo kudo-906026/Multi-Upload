@@ -580,7 +580,7 @@ router.get('/trends', async (req: Request, res: Response) => {
     const region = String(req.query.region || 'US');
     const forceRefresh = req.query.refresh === 'true';
 
-    const report = await TrendService.getNicheTrends(niche, region, forceRefresh);
+    const report = await TrendService.getNicheTrends(niche, region, forceRefresh, userId);
     res.json({ success: true, data: report });
   } catch (err: any) {
     console.error('[TrendsRoute] Error fetching trends:', err);
