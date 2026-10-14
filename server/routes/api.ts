@@ -85,17 +85,26 @@ const chunkUpload = multer({
 // ==============================================================================
 
 /**
- * Public endpoint that returns Supabase project URL and anon public key.
- * Allows the browser SPA to initialize Supabase Auth before user signs in.
+ * Public endpoint that returns only SUPABASE_URL and SUPABASE_ANON_KEY.
+ * The frontend fetches this at startup so it does not rely on build-time VITE_ variables.
  * Secret keys are strictly kept on backend only.
  */
+router.get('/config', (req: Request, res: Response) => {
+  res.json({
+    SUPABASE_URL: config.supabase.url || '',
+    SUPABASE_ANON_KEY: config.supabase.anonKey || '',
+  });
+});
+
 router.get('/config/auth', (req: Request, res: Response) => {
   res.json({
     success: true,
     data: {
-      supabaseUrl: config.supabase.url,
-      supabaseAnonKey: config.supabase.anonKey,
+      supabaseUrl: config.supabase.url || '',
+      supabaseAnonKey: config.supabase.anonKey || '',
     },
+    SUPABASE_URL: config.supabase.url || '',
+    SUPABASE_ANON_KEY: config.supabase.anonKey || '',
   });
 });
 

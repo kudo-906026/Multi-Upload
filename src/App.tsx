@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Video, Flame, History, Users, Settings, Sparkles, Loader2 } from 'lucide-react';
+import { Video, Flame, History, Users, Settings, Sparkles, Loader2, AlertTriangle, RefreshCw, Key } from 'lucide-react';
 import { Header } from './components/Header';
 import { AuthScreen } from './components/AuthScreen';
 import { VideoUploader } from './components/VideoUploader';
@@ -25,12 +25,19 @@ import {
   AIUsageQuota,
 } from '@shared/types';
 import { ApiClient } from './api';
-import { getCurrentUser, signOutUser, getSupabase } from './supabase';
+import {
+  getCurrentUser,
+  signOutUser,
+  getSupabase,
+  loadRuntimeConfig,
+  resetConfigState,
+} from './supabase';
 
 export const App: React.FC = () => {
-  // Authentication state
+  // Authentication & Configuration state
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [aiQuota, setAiQuota] = useState<AIUsageQuota | null>(null);
 
   // App navigation & data state
@@ -50,54 +57,98 @@ export const App: React.FC = () => {
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize and check current user session
+  const initAuth = async () => {
+    setIsAuthChecking(true);
+    setConfigError(null);
+
+    try {
+      const { client, error } = await loadRuntimeConfig();
+      if (error || !client) {
+        setConfigError(error || 'Config missing: SUPABASE_ANON_KEY');
+        setIsAuthChecking(false);
+        return;
+      }
+
+      const user = await getCurrentUser();
+      if (user && user.email) {
+        setCurrentUser({ id: user.id, email: user.email });
+      } else {
+        setCurrentUser(null);
+      }
+    } catch (err: any) {
+      console.error('[AppInit Error]:', err);
+      setConfigError(err.message || 'Config initialization error');
+    } finally {
+      setIsAuthChecking(false);
+    }
+  };
+
+  // Initialize runtime config and check current user session
   useEffect(() => {
     let isMounted = true;
+    let authSubscription: { unsubscribe: () => void } | null = null;
 
-    async function checkAuth() {
+    async function bootstrap() {
+      setIsAuthChecking(true);
+      setConfigError(null);
+
       try {
+        const { client, error } = await loadRuntimeConfig();
+        if (!isMounted) return;
+
+        if (error || !client) {
+          setConfigError(error || 'Config missing: SUPABASE_ANON_KEY');
+          setIsAuthChecking(false);
+          return;
+        }
+
         const user = await getCurrentUser();
-        if (isMounted) {
-          if (user && user.email) {
-            setCurrentUser({ id: user.id, email: user.email });
+        if (!isMounted) return;
+
+        if (user && user.email) {
+          setCurrentUser({ id: user.id, email: user.email });
+        } else {
+          setCurrentUser(null);
+        }
+
+        // Listen to Supabase auth state changes
+        const { data } = client.auth.onAuthStateChange((_event, session) => {
+          if (!isMounted) return;
+          if (session?.user && session.user.email) {
+            setCurrentUser({ id: session.user.id, email: session.user.email });
           } else {
             setCurrentUser(null);
+            setPresets([]);
+            setJobs([]);
+            setAuthStatus(null);
+            setAiQuota(null);
           }
+        });
+        authSubscription = data.subscription;
+      } catch (err: any) {
+        console.error('[AppInit Fatal]:', err);
+        if (isMounted) {
+          setConfigError(err.message || 'Failed to initialize app configuration');
         }
-      } catch (err) {
-        console.error('Error verifying Supabase user session:', err);
       } finally {
         if (isMounted) setIsAuthChecking(false);
       }
     }
 
-    checkAuth();
-
-    // Listen to Supabase auth state changes
-    getSupabase().then((client) => {
-      if (!client || !isMounted) return;
-      const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
-        if (!isMounted) return;
-        if (session?.user && session.user.email) {
-          setCurrentUser({ id: session.user.id, email: session.user.email });
-        } else {
-          setCurrentUser(null);
-          setPresets([]);
-          setJobs([]);
-          setAuthStatus(null);
-          setAiQuota(null);
-        }
-      });
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    });
+    bootstrap();
 
     return () => {
       isMounted = false;
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
     };
   }, []);
+
+  const handleRetryConfig = () => {
+    resetConfigState();
+    initAuth();
+  };
 
   // Capture beforeinstallprompt for PWA native install
   useEffect(() => {
@@ -243,6 +294,51 @@ export const App: React.FC = () => {
       setIsPublishing(false);
     }
   };
+
+  // If configuration is missing or invalid, display visible warning card instead of blank screen
+  if (configError) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 selection:bg-indigo-500 selection:text-white">
+        <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-white tracking-tight">Configuration Required</h1>
+              <p className="text-xs text-slate-400 mt-0.5">Missing environment variable</p>
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-xs space-y-1">
+            <div className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Status</div>
+            <div className="font-mono text-amber-200 text-xs sm:text-sm font-semibold break-words">
+              {configError}
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-300 space-y-2 bg-slate-950/80 p-4 rounded-xl border border-slate-800/80">
+            <div className="flex items-center space-x-1.5 font-semibold text-indigo-400">
+              <Key className="w-3.5 h-3.5" />
+              <span>How to fix in Render</span>
+            </div>
+            <p className="text-slate-400 text-[11px] leading-relaxed">
+              Open your <strong>Render Dashboard</strong> &rarr; Web Service &rarr; <strong>Environment</strong>. Ensure <strong>SUPABASE_URL</strong> and <strong>SUPABASE_ANON_KEY</strong> (or your <strong>omnipost</strong> group) are linked.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRetryConfig}
+            className="w-full py-3 px-4 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Check Configuration Again</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // If initial auth verification is still checking
   if (isAuthChecking) {

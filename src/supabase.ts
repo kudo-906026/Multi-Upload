@@ -1,7 +1,10 @@
-import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 
 let supabaseInstance: SupabaseClient | null = null;
 let initPromise: Promise<SupabaseClient | null> | null = null;
+let cachedConfigError: string | null = null;
+let cachedConfig: AuthConfig | null = null;
+let isConfigLoaded = false;
 
 export interface AuthConfig {
   supabaseUrl: string;
@@ -9,168 +12,310 @@ export interface AuthConfig {
 }
 
 /**
- * Initializes and returns the singleton Supabase client.
- * Tries environment variables first, falls back to fetching public config from /api/config/auth.
+ * Validates whether a given string is a valid HTTP or HTTPS URL.
+ */
+function isValidHttpUrl(str: string): boolean {
+  if (!str) return false;
+  try {
+    const url = new URL(str);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetches runtime configuration directly from the backend /api/config endpoint.
+ * Does NOT rely on build-time VITE_ environment variables.
+ */
+export async function loadRuntimeConfig(): Promise<{
+  client: SupabaseClient | null;
+  error: string | null;
+  config: AuthConfig | null;
+}> {
+  if (supabaseInstance && cachedConfig) {
+    return { client: supabaseInstance, error: null, config: cachedConfig };
+  }
+
+  try {
+    console.log('[SupabaseInit] Fetching runtime configuration from /api/config...');
+    const res = await fetch('/api/config');
+    
+    if (!res.ok) {
+      const errorMsg = `Failed to fetch /api/config: HTTP ${res.status} ${res.statusText}`;
+      console.error(`[OmniPost Config Error] ${errorMsg}`);
+      cachedConfigError = errorMsg;
+      isConfigLoaded = true;
+      return { client: null, error: errorMsg, config: null };
+    }
+
+    const data = await res.json();
+    
+    // Support both direct uppercase keys and lowercase fallback
+    const rawUrl = (data?.SUPABASE_URL || data?.data?.supabaseUrl || '').trim();
+    const rawAnonKey = (data?.SUPABASE_ANON_KEY || data?.data?.supabaseAnonKey || '').trim();
+
+    // Check for missing SUPABASE_URL
+    if (!rawUrl || rawUrl.includes('<your-') || rawUrl === '') {
+      const err = 'Config missing: SUPABASE_URL';
+      console.error(`[OmniPost Config Error] ${err}. Received value: "${rawUrl}"`);
+      cachedConfigError = err;
+      isConfigLoaded = true;
+      return { client: null, error: err, config: null };
+    }
+
+    // Check for missing SUPABASE_ANON_KEY
+    if (!rawAnonKey || rawAnonKey.includes('<your-') || rawAnonKey === '') {
+      const err = 'Config missing: SUPABASE_ANON_KEY';
+      console.error(`[OmniPost Config Error] ${err}`);
+      cachedConfigError = err;
+      isConfigLoaded = true;
+      return { client: null, error: err, config: null };
+    }
+
+    // Validate URL structure
+    if (!isValidHttpUrl(rawUrl)) {
+      const err = `Config invalid: SUPABASE_URL "${rawUrl}" is not a valid HTTP(S) URL`;
+      console.error(`[OmniPost Config Error] ${err}`);
+      cachedConfigError = err;
+      isConfigLoaded = true;
+      return { client: null, error: err, config: null };
+    }
+
+    // Initialize the client safely
+    try {
+      supabaseInstance = createClient(rawUrl, rawAnonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      });
+
+      console.log(`[SupabaseInit] Successfully connected to Supabase: ${rawUrl}`);
+      cachedConfig = { supabaseUrl: rawUrl, supabaseAnonKey: rawAnonKey };
+      cachedConfigError = null;
+      isConfigLoaded = true;
+
+      return {
+        client: supabaseInstance,
+        error: null,
+        config: cachedConfig,
+      };
+    } catch (clientCreationErr: any) {
+      const err = `Failed to initialize Supabase client: ${clientCreationErr.message || 'Unknown error'}`;
+      console.error(`[OmniPost Config Error] ${err}`, clientCreationErr);
+      cachedConfigError = err;
+      isConfigLoaded = true;
+      return { client: null, error: err, config: null };
+    }
+  } catch (networkErr: any) {
+    const err = `Network error connecting to /api/config: ${networkErr.message || 'Cannot reach backend'}`;
+    console.error(`[OmniPost Config Error] ${err}`, networkErr);
+    cachedConfigError = err;
+    isConfigLoaded = true;
+    return { client: null, error: err, config: null };
+  }
+}
+
+/**
+ * Returns the singleton Supabase client or null if not yet configured.
+ * Safely awaits runtime config loading without crashing.
  */
 export async function getSupabase(): Promise<SupabaseClient | null> {
   if (supabaseInstance) return supabaseInstance;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    let url = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-    let anonKey = (
-      import.meta.env.VITE_SUPABASE_ANON_KEY ||
-      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      ''
-    ).trim();
-
-    if (!url || !anonKey) {
-      try {
-        const res = await fetch('/api/config/auth');
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && json.data) {
-            url = json.data.supabaseUrl || url;
-            anonKey = json.data.supabaseAnonKey || anonKey;
-          }
-        }
-      } catch (err) {
-        console.warn('[SupabaseClient] Could not fetch public auth config:', err);
-      }
-    }
-
-    if (!url || !anonKey) {
-      console.warn('[SupabaseClient] SUPABASE_URL or SUPABASE_ANON_KEY not configured yet.');
-      return null;
-    }
-
-    supabaseInstance = createClient(url, anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    });
-
-    return supabaseInstance;
+    const result = await loadRuntimeConfig();
+    return result.client;
   })();
 
   return initPromise;
 }
 
 /**
- * Returns current access token (JWT) to attach to Authorization header.
+ * Inspect the current configuration status.
  */
-export async function getAccessToken(): Promise<string | null> {
-  const client = await getSupabase();
-  if (!client) return null;
-
-  try {
-    const { data: { session } } = await client.auth.getSession();
-    return session?.access_token || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Returns current authenticated user.
- */
-export async function getCurrentUser(): Promise<User | null> {
-  const client = await getSupabase();
-  if (!client) return null;
-
-  try {
-    const { data: { user } } = await client.auth.getUser();
-    return user;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Sign in with email and password.
- */
-export async function signInWithEmail(email: string, password: string): Promise<{ user: User | null; error?: string }> {
-  const client = await getSupabase();
-  if (!client) return { user: null, error: 'Supabase client not initialized. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.' };
-
-  const { data, error } = await client.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  if (error) {
-    return { user: null, error: error.message };
-  }
-  return { user: data.user };
-}
-
-/**
- * Sign up with email and password.
- */
-export async function signUpWithEmail(email: string, password: string): Promise<{ user: User | null; message?: string; error?: string }> {
-  const client = await getSupabase();
-  if (!client) return { user: null, error: 'Supabase client not initialized. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.' };
-
-  const { data, error } = await client.auth.signUp({
-    email,
-    password,
-  });
-
-  if (error) {
-    return { user: null, error: error.message };
-  }
-
-  // If email confirmation is enabled on Supabase project
-  const needsConfirmation = !data.session && data.user && data.user.identities && data.user.identities.length > 0;
-
+export function getConfigStatus(): {
+  isLoaded: boolean;
+  configError: string | null;
+  hasClient: boolean;
+} {
   return {
-    user: data.user,
-    message: needsConfirmation
-      ? 'Account created! Please check your email for the confirmation link to sign in.'
-      : 'Account created successfully!',
+    isLoaded: isConfigLoaded,
+    configError: cachedConfigError,
+    hasClient: Boolean(supabaseInstance),
   };
 }
 
 /**
- * Sign in with Google OAuth via Supabase Auth.
+ * Reset config state for retrying.
+ */
+export function resetConfigState() {
+  supabaseInstance = null;
+  cachedConfig = null;
+  initPromise = null;
+  cachedConfigError = null;
+  isConfigLoaded = false;
+}
+
+/**
+ * Returns current access token (JWT) to attach to Authorization header.
+ */
+export async function getAccessToken(): Promise<string | null> {
+  try {
+    const client = await getSupabase();
+    if (!client) return null;
+
+    const { data: { session } } = await client.auth.getSession();
+    return session?.access_token || null;
+  } catch (err) {
+    console.warn('[SupabaseAuth] getAccessToken error:', err);
+    return null;
+  }
+}
+
+/**
+ * Returns current authenticated user safely.
+ */
+export async function getCurrentUser(): Promise<User | null> {
+  try {
+    const client = await getSupabase();
+    if (!client) return null;
+
+    const { data: { user } } = await client.auth.getUser();
+    return user;
+  } catch (err) {
+    console.warn('[SupabaseAuth] getCurrentUser error:', err);
+    return null;
+  }
+}
+
+/**
+ * Sign in with email and password safely.
+ */
+export async function signInWithEmail(
+  email: string,
+  password: string
+): Promise<{ user: User | null; error?: string }> {
+  try {
+    const client = await getSupabase();
+    if (!client) {
+      return {
+        user: null,
+        error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY. Please configure your Supabase variables in Render.',
+      };
+    }
+
+    const { data, error } = await client.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      return { user: null, error: error.message };
+    }
+    return { user: data.user };
+  } catch (err: any) {
+    return { user: null, error: err.message || 'An error occurred during sign-in' };
+  }
+}
+
+/**
+ * Sign up with email and password safely.
+ */
+export async function signUpWithEmail(
+  email: string,
+  password: string
+): Promise<{ user: User | null; message?: string; error?: string }> {
+  try {
+    const client = await getSupabase();
+    if (!client) {
+      return {
+        user: null,
+        error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY. Please configure your Supabase variables in Render.',
+      };
+    }
+
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+    });
+
+    if (error) {
+      return { user: null, error: error.message };
+    }
+
+    const needsConfirmation = !data.session && data.user && data.user.identities && data.user.identities.length > 0;
+
+    return {
+      user: data.user,
+      message: needsConfirmation
+        ? 'Account created! Please check your email for the confirmation link to sign in.'
+        : 'Account created successfully!',
+    };
+  } catch (err: any) {
+    return { user: null, error: err.message || 'An error occurred during sign-up' };
+  }
+}
+
+/**
+ * Sign in with Google OAuth via Supabase Auth safely.
  */
 export async function signInWithGoogle(): Promise<{ error?: string }> {
-  const client = await getSupabase();
-  if (!client) return { error: 'Supabase client not initialized.' };
+  try {
+    const client = await getSupabase();
+    if (!client) {
+      return { error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY' };
+    }
 
-  const { error } = await client.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin,
-    },
-  });
+    const { error } = await client.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
 
-  if (error) return { error: error.message };
-  return {};
+    if (error) return { error: error.message };
+    return {};
+  } catch (err: any) {
+    return { error: err.message || 'Failed to initialize Google Sign-In' };
+  }
 }
 
 /**
- * Trigger password reset email.
+ * Trigger password reset email safely.
  */
-export async function resetPasswordForEmail(email: string): Promise<{ success: boolean; error?: string }> {
-  const client = await getSupabase();
-  if (!client) return { success: false, error: 'Supabase client not initialized.' };
+export async function resetPasswordForEmail(
+  email: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = await getSupabase();
+    if (!client) {
+      return { success: false, error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY' };
+    }
 
-  const { error } = await client.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/?reset_password=true`,
-  });
+    const { error } = await client.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/?reset_password=true`,
+    });
 
-  if (error) return { success: false, error: error.message };
-  return { success: true };
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to request password reset' };
+  }
 }
 
 /**
- * Sign out the current user.
+ * Sign out the current user safely.
  */
 export async function signOutUser(): Promise<void> {
-  const client = await getSupabase();
-  if (!client) return;
-  await client.auth.signOut();
+  try {
+    const client = await getSupabase();
+    if (!client) return;
+    await client.auth.signOut();
+  } catch (err) {
+    console.warn('[SupabaseAuth] signOutUser error:', err);
+  }
 }
