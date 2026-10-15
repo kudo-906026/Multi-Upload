@@ -12,6 +12,7 @@ import { JobQueueView } from './components/JobQueueView';
 import { PlatformSettingsModal } from './components/PlatformSettingsModal';
 import { AccountsView } from './components/AccountsView';
 import { DownloadAppModal } from './components/DownloadAppModal';
+import { BottomTabBar, TabId } from './components/BottomTabBar';
 import {
   Platform,
   VideoMetadata,
@@ -41,10 +42,15 @@ export const App: React.FC = () => {
   const [aiQuota, setAiQuota] = useState<AIUsageQuota | null>(null);
 
   // App navigation & data state
-  const [activeTab, setActiveTab] = useState<'create' | 'trends' | 'presets' | 'queue' | 'accounts' | 'settings'>('create');
+  const [activeTab, setActiveTab] = useState<TabId>('create');
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(['youtube', 'instagram']);
   const [currentVideo, setCurrentVideo] = useState<VideoMetadata | null>(null);
-  const [trendContext, setTrendContext] = useState<{ topic: string; hashtags: string[] } | null>(null);
+  const [trendContext, setTrendContext] = useState<{
+    topic: string;
+    hashtags: string[];
+    title?: string;
+    keywords?: string[];
+  } | null>(null);
   const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
   const [presets, setPresets] = useState<PlatformPreset[]>([]);
   const [jobs, setJobs] = useState<PublishJob[]>([]);
@@ -289,7 +295,8 @@ export const App: React.FC = () => {
       setJobs([job, ...jobs]);
       setActiveTab('queue');
     } catch (err: any) {
-      alert(`Publishing failed: ${err.message || 'Unknown error'}`);
+      console.error('[Publishing failed]:', err);
+      throw err;
     } finally {
       setIsPublishing(false);
     }
@@ -387,7 +394,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8 pb-24 sm:pb-8">
         {/* TAB 1: Studio (Video Upload, Formatting & Publishing Flow) */}
         {activeTab === 'create' && (
           <div className="space-y-6 sm:space-y-8">
@@ -486,6 +493,7 @@ export const App: React.FC = () => {
                 <MetadataReview
                   selectedPlatforms={selectedPlatforms}
                   aiResult={aiResult}
+                  video={currentVideo}
                   presets={presets}
                   authStatus={authStatus}
                   onOpenAccounts={() => setActiveTab('accounts')}
@@ -501,8 +509,8 @@ export const App: React.FC = () => {
         {/* TAB 2: Trend Finder */}
         {activeTab === 'trends' && (
           <TrendsView
-            onUseTrendInStudio={(topic, hashtags) => {
-              setTrendContext({ topic, hashtags });
+            onUseTrendInStudio={(topic, hashtags, title, keywords) => {
+              setTrendContext({ topic, hashtags, title, keywords });
               setActiveTab('create');
             }}
           />
@@ -513,6 +521,7 @@ export const App: React.FC = () => {
           <PresetsManager
             presets={presets}
             onPresetsUpdated={(newPresets) => setPresets(newPresets)}
+            onBackToStudio={() => setActiveTab('create')}
           />
         )}
 
@@ -544,73 +553,13 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Floating Bottom Bar */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 border-t border-slate-800/80 backdrop-blur-lg flex items-center justify-around py-1.5 px-2">
-        {/* Studio Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('create')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
-            activeTab === 'create' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Video className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">Studio</span>
-        </button>
-
-        {/* Trends Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('trends')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
-            activeTab === 'trends' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Flame className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">Trends</span>
-        </button>
-
-        {/* Queue Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('queue')}
-          className={`relative flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
-            activeTab === 'queue' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <History className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">Queue</span>
-          {activeJobsCount > 0 && (
-            <span className="absolute top-1 right-2 w-3.5 h-3.5 rounded-full bg-pink-500 text-white text-[8px] font-bold flex items-center justify-center">
-              {activeJobsCount}
-            </span>
-          )}
-        </button>
-
-        {/* Accounts Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('accounts')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
-            activeTab === 'accounts' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">Accounts</span>
-        </button>
-
-        {/* Settings Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('settings')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${
-            activeTab === 'settings' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">Settings</span>
-        </button>
-      </nav>
+      {/* Modern Mobile Bottom Tab Bar (Studio, Trends, Queue, Accounts) */}
+      <BottomTabBar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        activeJobsCount={activeJobsCount}
+        authStatus={authStatus}
+      />
 
       {/* Download / Install App Modal */}
       <DownloadAppModal

@@ -310,18 +310,39 @@ export class InstagramService {
       caption = `${caption}\n\n${tagString}`;
     }
 
+    const reelParams: Record<string, any> = {
+      media_type: 'REELS',
+      video_url: publicVideoUrl,
+      caption: caption.slice(0, 2200),
+      share_to_feed: payload.shareToFeed ?? true,
+      access_token: longLivedToken,
+    };
+
+    if (payload.coverImageUrl && (payload.coverImageUrl.startsWith('http://') || payload.coverImageUrl.startsWith('https://'))) {
+      reelParams.cover_url = payload.coverImageUrl;
+    }
+
+    if (payload.thumbOffsetMs !== undefined && payload.thumbOffsetMs >= 0) {
+      reelParams.thumb_offset = payload.thumbOffsetMs;
+    }
+
+    if (payload.location && payload.location.trim()) {
+      reelParams.location_id = payload.location.trim();
+    }
+
+    if (payload.collaborators && payload.collaborators.length > 0) {
+      const cleanCollabs = payload.collaborators.map((c) => c.replace(/^@/, '').trim()).filter(Boolean);
+      if (cleanCollabs.length > 0) {
+        reelParams.collaborators = JSON.stringify(cleanCollabs);
+      }
+    }
+
     // Step 1: Create Media Container
     const containerRes = await axios.post(
       `${this.BASE_URL}/${igUserId}/media`,
       null,
       {
-        params: {
-          media_type: 'REELS',
-          video_url: publicVideoUrl,
-          caption: caption.slice(0, 2200),
-          share_to_feed: payload.shareToFeed ?? true,
-          access_token: longLivedToken,
-        },
+        params: reelParams,
         timeout: 30000,
       }
     );

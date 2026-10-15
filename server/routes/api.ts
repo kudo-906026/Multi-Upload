@@ -663,20 +663,56 @@ router.get('/presets', async (req: Request, res: Response) => {
 router.post('/presets', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const { platform, name, fixedHashtags, descriptionFooter, category, privacy, tone, shareToFeed } = req.body;
+    const {
+      id,
+      platform,
+      name,
+      genre,
+      titleTemplate,
+      descriptionTemplate,
+      captionTemplate,
+      fixedHashtags,
+      descriptionFooter,
+      tags,
+      category,
+      privacy,
+      tone,
+      shareToFeed,
+      madeForKids,
+      language,
+      defaultLocation,
+      collaborators,
+      hashtagLimit,
+    } = req.body;
+
     if (!platform || (platform !== 'youtube' && platform !== 'instagram')) {
       return res.status(400).json({ success: false, error: 'Valid platform (youtube or instagram) is required' });
     }
 
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Preset name is required' });
+    }
+
     const saved = await PresetService.savePreset(userId, {
+      id,
       platform,
-      name,
+      name: name.trim(),
+      genre: genre || 'custom',
+      titleTemplate,
+      descriptionTemplate,
+      captionTemplate,
       fixedHashtags: Array.isArray(fixedHashtags) ? fixedHashtags : [],
       descriptionFooter: descriptionFooter || '',
-      category: category || '28',
+      tags: Array.isArray(tags) ? tags : [],
+      category: category || (platform === 'youtube' ? '1' : '28'),
       privacy: privacy || 'public',
       tone: tone || 'viral_hook',
       shareToFeed: shareToFeed ?? true,
+      madeForKids: madeForKids ?? false,
+      language: language || 'en',
+      defaultLocation,
+      collaborators: Array.isArray(collaborators) ? collaborators : [],
+      hashtagLimit: hashtagLimit || 5,
     });
 
     res.json({ success: true, data: saved });
@@ -688,12 +724,17 @@ router.post('/presets', async (req: Request, res: Response) => {
 router.post('/presets/merge', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const { aiOutput, platform } = req.body;
+    const { aiOutput, platform, presetId, customPreset } = req.body;
     if (!aiOutput || !platform) {
       return res.status(400).json({ success: false, error: 'aiOutput and platform are required' });
     }
 
-    const merged = await PresetService.mergeWithPreset(userId, aiOutput, platform as Platform);
+    let preset = customPreset;
+    if (!preset && presetId) {
+      preset = await PresetService.getById(userId, presetId);
+    }
+
+    const merged = await PresetService.mergeWithPreset(userId, aiOutput, platform as Platform, preset);
     res.json({ success: true, data: merged });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

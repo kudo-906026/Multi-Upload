@@ -1,28 +1,20 @@
 import React, { useState } from 'react';
 import {
-  Video,
-  Flame,
+  Sparkles,
   Sliders,
-  History,
-  Settings,
-  Youtube,
-  Instagram,
+  LogOut,
+  Download,
+  User as UserIcon,
+  ChevronDown,
   CheckCircle2,
   AlertCircle,
-  RefreshCw,
-  DownloadCloud,
-  Users,
-  Menu,
-  X,
-  LogOut,
-  User as UserIcon,
-  Sparkles,
 } from 'lucide-react';
 import { PlatformAuthStatus, UserProfile, AIUsageQuota } from '@shared/types';
+import { TabId } from './BottomTabBar';
 
 interface HeaderProps {
-  activeTab: 'create' | 'trends' | 'presets' | 'queue' | 'accounts' | 'settings';
-  setActiveTab: (tab: 'create' | 'trends' | 'presets' | 'queue' | 'accounts' | 'settings') => void;
+  activeTab: TabId;
+  setActiveTab: (tab: TabId) => void;
   authStatus: PlatformAuthStatus | null;
   activeJobsCount: number;
   user?: UserProfile | null;
@@ -37,399 +29,173 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   authStatus,
-  activeJobsCount,
   user,
   aiQuota,
-  onRefreshAuth,
   onOpenDownloadModal,
   onLogout,
   isPwaInstallable,
 }) => {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-  const youtubeCount = authStatus?.youtube.accounts?.length || 0;
-  const instagramCount = authStatus?.instagram.accounts?.length || 0;
-  const totalAccounts = youtubeCount + instagramCount;
+  const ytConnected = (authStatus?.youtube.accounts?.length || 0) > 0;
+  const igConnected = (authStatus?.instagram.accounts?.length || 0) > 0;
 
-  const handleTabClick = (tab: 'create' | 'trends' | 'presets' | 'queue' | 'accounts' | 'settings') => {
-    setActiveTab(tab);
-    setIsMobileMenuOpen(false);
-  };
+  const remainingQuota = aiQuota
+    ? Math.max(0, (aiQuota.dailyLimit || 20) - (aiQuota.analyzeUsed || 0))
+    : null;
 
   return (
-    <header className="sticky top-0 z-50 w-full max-w-full border-b border-slate-800/80 bg-slate-950/95 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between min-h-14 sm:h-16 gap-1.5 sm:gap-4 py-1 sm:py-0">
-          {/* Brand Logo & Name */}
-          <div
-            className="flex items-center space-x-2 sm:space-x-3 cursor-pointer shrink-0 mr-1 sm:mr-0"
-            onClick={() => handleTabClick('create')}
-          >
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-pink-600 to-amber-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
-              <span className="text-base sm:text-xl">⚡</span>
-            </div>
-            <div className="flex flex-col justify-center">
-              <div className="flex items-center">
-                <span className="font-extrabold text-base sm:text-xl tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                  OmniPost
-                </span>
-                {/* PRO badge inline on >= sm screens with generous spacing */}
-                <span className="hidden sm:inline-flex ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold tracking-wide">
-                  PRO
-                </span>
-              </div>
-              {/* PRO badge placed under the logo/name on mobile (< 640px) to prevent any overlap */}
-              <div className="flex items-center sm:hidden mt-0.5">
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold leading-tight">
-                  PRO
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">YouTube & Instagram Reels Publisher</p>
-            </div>
+    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-xl">
+      <div className="max-w-4xl mx-auto px-3.5 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+        {/* Brand / Logo */}
+        <div
+          onClick={() => setActiveTab('create')}
+          className="flex items-center space-x-2.5 cursor-pointer select-none group"
+        >
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-pink-600 to-amber-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
+            <span className="text-base sm:text-lg">⚡</span>
           </div>
-
-          {/* Desktop Platform Status Badges */}
-          <div className="hidden lg:flex items-center space-x-2 shrink-0">
-            {/* YouTube Auth Badge */}
-            <div
-              onClick={() => handleTabClick('accounts')}
-              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                youtubeCount > 0
-                  ? 'bg-red-950/40 border border-red-800/60 text-red-300 hover:bg-red-950/60'
-                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <Youtube className="w-3.5 h-3.5 text-red-500" />
-              <span>{youtubeCount > 0 ? `${youtubeCount} YouTube ${youtubeCount === 1 ? 'Channel' : 'Channels'}` : 'Connect YouTube'}</span>
-              {youtubeCount > 0 ? (
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              ) : (
-                <AlertCircle className="w-3 h-3 text-amber-400" />
-              )}
-            </div>
-
-            {/* Instagram Auth Badge */}
-            <div
-              onClick={() => handleTabClick('accounts')}
-              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                instagramCount > 0
-                  ? 'bg-pink-950/40 border border-pink-800/60 text-pink-300 hover:bg-pink-950/60'
-                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <Instagram className="w-3.5 h-3.5 text-pink-500" />
-              <span>
-                {instagramCount > 0
-                  ? `${instagramCount} Instagram ${instagramCount === 1 ? 'Account' : 'Accounts'}`
-                  : 'Connect Instagram'}
+          <div>
+            <div className="flex items-center space-x-1.5">
+              <span className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
+                OmniPost
               </span>
-              {instagramCount > 0 ? (
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              ) : (
-                <AlertCircle className="w-3 h-3 text-amber-400" />
-              )}
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 font-semibold border border-indigo-500/25">
+                Studio
+              </span>
             </div>
-
-            <button
-              onClick={onRefreshAuth}
-              title="Refresh platform credentials status"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
           </div>
-
-          {/* Navigation Bar */}
-          <nav className="flex items-center space-x-1 sm:space-x-2 shrink-0">
-            {/* Studio Tab */}
-            <button
-              onClick={() => handleTabClick('create')}
-              className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'create'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-              title="Studio"
-            >
-              <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="hidden min-[380px]:inline">Studio</span>
-            </button>
-
-            {/* Trends Tab (Right next to Studio) */}
-            <button
-              onClick={() => handleTabClick('trends')}
-              className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'trends'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-              title="Viral Trend Finder"
-            >
-              <Flame className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-              <span className="hidden min-[380px]:inline">Trends</span>
-            </button>
-
-            {/* Accounts Tab (Desktop only in top nav, mobile via hamburger & bottom bar) */}
-            <button
-              onClick={() => handleTabClick('accounts')}
-              className={`hidden sm:flex relative items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'accounts'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-              title="Connected Accounts"
-            >
-              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>Accounts</span>
-              {totalAccounts > 0 && (
-                <span className="px-1 sm:px-1.5 py-0.2 rounded-full bg-slate-800 text-indigo-300 text-[10px] font-mono border border-indigo-500/30">
-                  {totalAccounts}
-                </span>
-              )}
-            </button>
-
-            {/* Presets Tab (Visible on desktop, inside hamburger on mobile) */}
-            <button
-              onClick={() => handleTabClick('presets')}
-              className={`hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'presets'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Sliders className="w-4 h-4" />
-              <span>Presets</span>
-            </button>
-
-            {/* Queue Tab (Icon-only on mobile under 640px) */}
-            <button
-              onClick={() => handleTabClick('queue')}
-              className={`relative flex items-center space-x-1.5 p-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'queue'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-              title="Publishing Queue"
-            >
-              <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="hidden sm:inline">Queue</span>
-              {activeJobsCount > 0 && (
-                <span className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-pink-500 text-white text-[9px] sm:text-[10px] flex items-center justify-center font-bold animate-pulse">
-                  {activeJobsCount}
-                </span>
-              )}
-            </button>
-
-            {/* Settings Tab (Icon-only everywhere) */}
-            <button
-              onClick={() => handleTabClick('settings')}
-              className={`p-1.5 sm:p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/70 transition-all ${
-                activeTab === 'settings' ? 'bg-slate-800 text-white' : ''
-              }`}
-              title="API & Developer Settings"
-            >
-              <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-
-            {/* App / Download Button */}
-            <button
-              onClick={onOpenDownloadModal}
-              className="hidden lg:flex items-center space-x-1.5 p-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-amber-500 via-orange-500 to-pink-500 text-white hover:opacity-95 transition-all shadow-md shadow-orange-500/20 active:scale-95"
-              title="Install PWA or Download Release Package"
-            >
-              <DownloadCloud className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>Download App</span>
-            </button>
-
-            {/* User Profile, AI Quota & Logout (Desktop) */}
-            {user && (
-              <div className="hidden sm:flex items-center space-x-2 pl-2 border-l border-slate-800/80">
-                {aiQuota && (
-                  <div
-                    title={`Daily AI Quota: ${aiQuota.remainingAnalyses} video analyses left today`}
-                    className="flex items-center space-x-1 px-2 py-1 rounded-lg bg-indigo-950/40 border border-indigo-800/40 text-[11px] font-medium text-indigo-300"
-                  >
-                    <Sparkles className="w-3 h-3 text-indigo-400" />
-                    <span>{aiQuota.remainingAnalyses} AI</span>
-                  </div>
-                )}
-
-                <div
-                  title={`Logged in as ${user.email}`}
-                  className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 max-w-[140px] truncate"
-                >
-                  <UserIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span className="truncate text-[11px] font-medium">{user.email.split('@')[0]}</span>
-                </div>
-
-                <button
-                  onClick={onLogout}
-                  title="Sign out of your account"
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/30 border border-transparent hover:border-red-800/50 transition-all flex items-center space-x-1 text-xs"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden xl:inline">Logout</span>
-                </button>
-              </div>
-            )}
-
-            {/* Mobile Hamburger Toggle (under 640px) */}
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="sm:hidden p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all ml-0.5"
-              title="Toggle Menu"
-              aria-label="Toggle navigation menu"
-            >
-              {isMobileMenuOpen ? <X className="w-4 h-4 text-pink-400" /> : <Menu className="w-4 h-4" />}
-            </button>
-          </nav>
         </div>
 
-        {/* Mobile Dropdown Menu (Under 640px) */}
-        {isMobileMenuOpen && (
-          <div className="sm:hidden border-t border-slate-800/80 py-3 space-y-2 animate-fade-in bg-slate-950/98 rounded-b-2xl px-1">
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                onClick={() => handleTabClick('create')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold ${
-                  activeTab === 'create'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800/60'
-                }`}
-              >
-                <Video className="w-4 h-4" />
-                <span>Studio</span>
-              </button>
-
-              <button
-                onClick={() => handleTabClick('trends')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold ${
-                  activeTab === 'trends'
-                    ? 'bg-amber-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800/60'
-                }`}
-              >
-                <Flame className="w-4 h-4 text-amber-400" />
-                <span>Trends</span>
-              </button>
-
-              <button
-                onClick={() => handleTabClick('accounts')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold ${
-                  activeTab === 'accounts'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800/60'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Accounts ({totalAccounts})</span>
-              </button>
-
-              <button
-                onClick={() => handleTabClick('presets')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold ${
-                  activeTab === 'presets'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800/60'
-                }`}
-              >
-                <Sliders className="w-4 h-4" />
-                <span>Presets</span>
-              </button>
-
-              <button
-                onClick={() => handleTabClick('queue')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold ${
-                  activeTab === 'queue'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800/60'
-                }`}
-              >
-                <History className="w-4 h-4" />
-                <span>Queue {activeJobsCount > 0 ? `(${activeJobsCount})` : ''}</span>
-              </button>
-
-              <button
-                onClick={() => handleTabClick('settings')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold ${
-                  activeTab === 'settings'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800/60'
-                }`}
-              >
-                <Settings className="w-4 h-4" />
-                <span>API Settings</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenDownloadModal();
-                }}
-                className="flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-bold text-amber-300 bg-amber-950/40 border border-amber-800/50"
-              >
-                <DownloadCloud className="w-4 h-4" />
-                <span>Download App</span>
-              </button>
+        {/* Action Controls on the Right */}
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* AI Quota Pill (if available) */}
+          {remainingQuota !== null && (
+            <div
+              className="hidden xs:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-medium text-slate-300"
+              title={`${remainingQuota} AI analyses remaining today (resets at 00:00 UTC)`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>{remainingQuota} Left</span>
             </div>
+          )}
 
-            {/* Mobile Platform Auth Status Badges */}
-            <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between px-1 text-xs">
-              <div
-                onClick={() => handleTabClick('accounts')}
-                className="flex items-center space-x-1.5 cursor-pointer text-slate-300"
-              >
-                <Youtube className="w-3.5 h-3.5 text-red-500" />
-                <span className="text-[11px]">{youtubeCount > 0 ? `${youtubeCount} YT` : 'No YT'}</span>
+          {/* Presets Quick Action */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('presets')}
+            className={`p-2 rounded-xl border text-xs font-semibold flex items-center space-x-1.5 transition-all ${
+              activeTab === 'presets'
+                ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/30'
+                : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+            }`}
+            title="Custom Hashtags & Publishing Presets"
+          >
+            <Sliders className="w-4 h-4 text-indigo-400" />
+            <span className="hidden sm:inline">Presets</span>
+          </button>
+
+          {/* Download App / PWA Install Button */}
+          <button
+            type="button"
+            onClick={onOpenDownloadModal}
+            className="p-2 sm:px-3 sm:py-2 rounded-xl border border-slate-800 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all"
+            title="Download Android APK or Install PWA"
+          >
+            <Download className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">{isPwaInstallable ? 'Install' : 'App'}</span>
+          </button>
+
+          {/* User Profile & Menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="flex items-center space-x-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
+            >
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-[11px] font-bold">
+                {user?.email?.charAt(0).toUpperCase() || 'U'}
               </div>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
 
-              <div
-                onClick={() => handleTabClick('accounts')}
-                className="flex items-center space-x-1.5 cursor-pointer text-slate-300"
-              >
-                <Instagram className="w-3.5 h-3.5 text-pink-500" />
-                <span className="text-[11px]">{instagramCount > 0 ? `${instagramCount} IG` : 'No IG'}</span>
-              </div>
+            {/* Dropdown Menu */}
+            {isUserMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsUserMenuOpen(false)}
+                />
+                <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl z-50 p-3 space-y-3 animate-fade-in text-xs">
+                  {/* User Email */}
+                  <div className="border-b border-slate-800 pb-2.5 px-1">
+                    <p className="text-[11px] text-slate-400">Signed in as</p>
+                    <p className="font-semibold text-white truncate text-xs mt-0.5">
+                      {user?.email || 'User'}
+                    </p>
+                  </div>
 
-              <button
-                onClick={onRefreshAuth}
-                className="p-1 rounded text-slate-400 hover:text-white"
-                title="Refresh Status"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                  {/* Channel Connection Quick Indicators */}
+                  <div className="space-y-1.5 px-1">
+                    <div
+                      onClick={() => {
+                        setActiveTab('accounts');
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex items-center justify-between text-slate-300 py-1 cursor-pointer hover:text-white transition-colors"
+                    >
+                      <span>YouTube Channel</span>
+                      {ytConnected ? (
+                        <span className="text-emerald-400 flex items-center gap-1 text-[11px]">
+                          <CheckCircle2 className="w-3 h-3" /> Connected
+                        </span>
+                      ) : (
+                        <span className="text-amber-400 flex items-center gap-1 text-[11px]">
+                          <AlertCircle className="w-3 h-3" /> Not linked
+                        </span>
+                      )}
+                    </div>
 
-            {/* Mobile User Profile & Logout */}
-            {user && (
-              <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between px-1 text-xs">
-                <div className="flex items-center space-x-2 truncate">
-                  <UserIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span className="truncate text-slate-300 font-medium text-xs">{user.email}</span>
-                  {aiQuota && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-800/50 text-indigo-300">
-                      {aiQuota.remainingAnalyses} AI left
-                    </span>
-                  )}
+                    <div
+                      onClick={() => {
+                        setActiveTab('accounts');
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex items-center justify-between text-slate-300 py-1 cursor-pointer hover:text-white transition-colors"
+                    >
+                      <span>Instagram Account</span>
+                      {igConnected ? (
+                        <span className="text-emerald-400 flex items-center gap-1 text-[11px]">
+                          <CheckCircle2 className="w-3 h-3" /> Connected
+                        </span>
+                      ) : (
+                        <span className="text-amber-400 flex items-center gap-1 text-[11px]">
+                          <AlertCircle className="w-3 h-3" /> Not linked
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Logout Button */}
+                  <div className="border-t border-slate-800 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        onLogout();
+                      }}
+                      className="w-full py-2 px-3 rounded-xl bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-900/50 flex items-center justify-center space-x-1.5 transition-colors font-semibold"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
                 </div>
-
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    onLogout();
-                  }}
-                  className="flex items-center space-x-1 px-2.5 py-1 rounded-lg text-red-400 hover:bg-red-950/40 border border-red-800/40 text-xs font-semibold"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Logout</span>
-                </button>
-              </div>
+              </>
             )}
           </div>
-        )}
+        </div>
       </div>
     </header>
   );
 };
-
-export default Header;

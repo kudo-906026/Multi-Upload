@@ -5,12 +5,13 @@ const config: CapacitorConfig = {
   appName: 'OmniPost Video',
   webDir: 'dist/client',
   server: {
+    url: 'https://omnipost-k6b5.onrender.com',
     androidScheme: 'https',
-    cleartext: true
+    cleartext: true,
   },
   android: {
-    allowMixedContent: true
-  }
+    allowMixedContent: true,
+  },
 };
 
 export default config;

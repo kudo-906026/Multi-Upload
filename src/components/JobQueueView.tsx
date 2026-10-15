@@ -23,16 +23,18 @@ interface JobQueueViewProps {
 export const JobQueueView: React.FC<JobQueueViewProps> = ({ jobs, onRefreshJobs }) => {
   const [retryingKeys, setRetryingKeys] = useState<Record<string, boolean>>({});
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const handleRetry = async (jobId: string, platform: Platform) => {
     const key = `${jobId}-${platform}`;
     setRetryingKeys((prev) => ({ ...prev, [key]: true }));
+    setRetryError(null);
 
     try {
       await ApiClient.retryJobPlatform(jobId, platform);
       onRefreshJobs();
     } catch (err: any) {
-      alert(`Retry failed: ${err.message}`);
+      setRetryError(`Retry failed for ${platform === 'youtube' ? 'YouTube' : 'Instagram'}: ${err.message || 'Network or authorization error'}`);
     } finally {
       setRetryingKeys((prev) => ({ ...prev, [key]: false }));
     }
@@ -215,6 +217,23 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({ jobs, onRefreshJobs 
             <span>Refresh Status</span>
           </button>
         </div>
+
+        {/* Retry Error Notice */}
+        {retryError && (
+          <div className="mt-4 p-3 bg-red-950/60 border border-red-800/80 rounded-xl text-xs flex items-center justify-between text-red-200 animate-fade-in">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{retryError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRetryError(null)}
+              className="text-red-400 hover:text-red-200 text-xs font-bold ml-2"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Jobs List */}
         {jobs.length === 0 ? (

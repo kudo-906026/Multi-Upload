@@ -314,3 +314,197 @@ CREATE POLICY "Users can delete their own videos"
     bucket_id = 'videos' AND 
     (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- ==============================================================================
+-- 8. SCHEDULING, ANALYTICS SNAPSHOTS, BEST TIME & CONTENT PLANNER TABLES
+-- All tables protected with Zero-Trust Per-User Row Level Security (RLS)
+-- NO "USING (true)" policies exist anywhere in this schema.
+-- ==============================================================================
+
+-- 8.1. SCHEDULED POSTS TABLE
+CREATE TABLE IF NOT EXISTS public.scheduled_posts (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL, -- 'instagram' or 'youtube'
+  run_at TIMESTAMPTZ NOT NULL,
+  time_zone TEXT NOT NULL DEFAULT 'UTC',
+  status TEXT NOT NULL DEFAULT 'scheduled', -- 'scheduled', 'publishing', 'completed', 'failed', 'cancelled'
+  video_storage_path TEXT,
+  video_url TEXT,
+  thumbnail_url TEXT,
+  title TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  selected_account_id TEXT,
+  retry_count INT NOT NULL DEFAULT 0,
+  max_retries INT NOT NULL DEFAULT 3,
+  last_error TEXT,
+  result_post_id TEXT,
+  result_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_posts_user_status ON public.scheduled_posts(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_scheduled_posts_run_at ON public.scheduled_posts(status, run_at);
+
+-- 8.2. VIDEO ANALYTICS TABLE
+CREATE TABLE IF NOT EXISTS public.video_analytics (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL, -- 'youtube' or 'instagram'
+  video_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  thumbnail_url TEXT,
+  video_url TEXT,
+  published_at TIMESTAMPTZ NOT NULL,
+  views BIGINT DEFAULT 0,
+  likes BIGINT DEFAULT 0,
+  comments BIGINT DEFAULT 0,
+  shares BIGINT DEFAULT 0,
+  saves BIGINT DEFAULT 0,
+  watch_time_hours NUMERIC DEFAULT 0,
+  avg_retention_percent NUMERIC DEFAULT 0,
+  first_48h_views BIGINT DEFAULT 0,
+  first_48h_engagement_rate NUMERIC DEFAULT 0,
+  tags JSONB DEFAULT '[]'::jsonb,
+  description TEXT,
+  character TEXT,
+  series TEXT,
+  edit_style TEXT,
+  music_audio TEXT,
+  duration_seconds INT DEFAULT 0,
+  engagement_rate NUMERIC DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT video_analytics_user_platform_video UNIQUE (user_id, platform, video_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_analytics_user_views ON public.video_analytics(user_id, views DESC);
+CREATE INDEX IF NOT EXISTS idx_video_analytics_user_published ON public.video_analytics(user_id, published_at DESC);
+
+-- 8.3. ACCOUNT ANALYTICS SNAPSHOTS TABLE
+CREATE TABLE IF NOT EXISTS public.account_analytics_snapshots (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,
+  snapshot_date DATE NOT NULL,
+  views BIGINT DEFAULT 0,
+  likes BIGINT DEFAULT 0,
+  comments BIGINT DEFAULT 0,
+  shares_saves BIGINT DEFAULT 0,
+  subscribers_followers BIGINT DEFAULT 0,
+  engagement_rate NUMERIC DEFAULT 0,
+  metrics JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT account_snapshots_user_platform_date UNIQUE (user_id, platform, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_snapshots_user_date ON public.account_analytics_snapshots(user_id, snapshot_date DESC);
+
+-- 8.4. CONTENT PLANS TABLE
+CREATE TABLE IF NOT EXISTS public.content_plans (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  niche TEXT NOT NULL,
+  patterns JSONB NOT NULL,
+  ideas JSONB NOT NULL,
+  weekly_calendar JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_plans_user ON public.content_plans(user_id, updated_at DESC);
+
+-- 8.5. ROW LEVEL SECURITY (RLS) POLICIES FOR NEW TABLES
+ALTER TABLE public.scheduled_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.video_analytics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.account_analytics_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.content_plans ENABLE ROW LEVEL SECURITY;
+
+-- scheduled_posts RLS
+CREATE POLICY "Users can only view their own scheduled posts"
+  ON public.scheduled_posts FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can only insert their own scheduled posts"
+  ON public.scheduled_posts FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only update their own scheduled posts"
+  ON public.scheduled_posts FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only delete their own scheduled posts"
+  ON public.scheduled_posts FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- video_analytics RLS
+CREATE POLICY "Users can only view their own video analytics"
+  ON public.video_analytics FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can only insert their own video analytics"
+  ON public.video_analytics FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only update their own video analytics"
+  ON public.video_analytics FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only delete their own video analytics"
+  ON public.video_analytics FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- account_analytics_snapshots RLS
+CREATE POLICY "Users can only view their own account analytics"
+  ON public.account_analytics_snapshots FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can only insert their own account analytics"
+  ON public.account_analytics_snapshots FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only update their own account analytics"
+  ON public.account_analytics_snapshots FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only delete their own account analytics"
+  ON public.account_analytics_snapshots FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- content_plans RLS
+CREATE POLICY "Users can only view their own content plans"
+  ON public.content_plans FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can only insert their own content plans"
+  ON public.content_plans FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only update their own content plans"
+  ON public.content_plans FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only delete their own content plans"
+  ON public.content_plans FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);

@@ -350,14 +350,16 @@ export class ApiClient {
 
   static async mergePreset(
     aiOutput: AIAnalysisResult,
-    platform: Platform
+    platform: Platform,
+    presetId?: string,
+    customPreset?: PlatformPreset
   ): Promise<{ youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload }> {
     const res = await safeFetch<{ youtube?: YouTubePublishPayload; instagram?: InstagramPublishPayload }>(
       `${BASE_URL}/presets/merge`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aiOutput, platform }),
+        body: JSON.stringify({ aiOutput, platform, presetId, customPreset }),
       }
     );
     if (!res.data) throw new Error(res.error || 'Failed to merge preset');

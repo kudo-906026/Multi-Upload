@@ -19,18 +19,35 @@ export class GeminiService {
     const topicPrompt = params.titleHint || params.descriptionHint || params.filename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
     const selectedTone = params.tone || 'viral_hook';
 
-    const systemPrompt = `You are a world-class social media strategist and algorithm optimization expert specializing in viral video publishing for YouTube (Long-form and Shorts) and Instagram Reels.
-Given a video subject/topic, your job is to:
-1. Conduct search research to discover currently trending topics, viral hashtags, and high-CTR search queries related to this content.
-2. Produce two distinct, platform-optimized metadata packages:
-   - For YouTube: High CTR title (< 100 characters), structured description (hook, summary, links/call to action, chapters preview), comma-separated search tags (< 500 characters total), and strategic hashtags (#Shorts, #Topic).
-   - For Instagram Reels: High-converting caption with an engaging 3-second hook, visual emoji layout, recommended audio type, and 15-25 high-performing hashtags (mixture of high-volume and niche).
-3. Selected tone style: "${selectedTone}".
+    const systemPrompt = `You are a world-class social media strategist and viral video algorithm optimization expert specializing in YouTube (Shorts & Long-form) and Instagram Reels.
+Given a video subject/filename/topic, your job is to:
+1. Conduct search research to discover currently trending topics, viral hashtags, and high-CTR queries.
+2. Identify pop-culture entities if applicable (e.g., Anime such as Jujutsu Kaisen/Demon Slayer/One Piece; Marvel/MCU such as Spider-Man/Deadpool/Avengers; Manhwa/Webtoons such as Solo Leveling/ORV; Gaming such as Valorant/GTA; Cinema; etc.):
+   - Recognize the main Character name (e.g. "Gojo Satoru", "Peter Parker / Spider-Man", "Sung Jin-woo", "Roronoa Zoro", "Deadpool")
+   - Recognize the Series / Franchise name (e.g. "Jujutsu Kaisen", "Marvel MCU", "Solo Leveling", "One Piece")
+   - Identify the Edit Style (e.g. "4K HDR Phonk Velocity", "Cinematic Beat Sync", "Emotional Slowdown", "Badass Flow Transition")
+3. Produce two distinct, platform-optimized metadata packages with the EXACT fields of the real upload screens:
+   - For YouTube:
+     * Title: Under 100 characters, high CTR, incorporates character/series and '#Shorts'.
+     * Description: Under 5000 characters, formatted with emojis, character/series lore, call to action, and hashtags.
+     * Tags: Comma-separated search tags strictly UNDER 500 characters total across all tags combined.
+     * Category: YouTube category ID ('1' for Film & Animation, '24' for Entertainment, '20' for Gaming, '28' for Tech).
+     * Language: 'en'
+     * isShorts: true
+   - For Instagram Reels:
+     * Caption: Under 2200 characters, engaging 3-second hook, spacing, call to action.
+     * Hashtags: Curate exactly 5 high-converting, targeted niche & viral hashtags (in line with Instagram's 2026 5-hashtag cap).
+     * Recommended Audio: Trending track or genre (e.g. "Trending Dark Phonk (Slowed)", "Synthwave Flow").
+     * Suggested Location: Realistic location (e.g. "Tokyo, Japan", "New York, NY", "Seoul, South Korea").
+     * Suggested Collaborators: Relevant curation handles (e.g. ["@animespotlight"], ["@marvelstudios"]).
 
-Return strictly valid JSON with this exact schema (no markdown fences, just pure JSON):
+Return strictly valid JSON with this exact schema (no markdown, just JSON):
 {
   "topic": "Clear summary of the video topic",
   "detectedTone": "Tone description",
+  "recognizedCharacter": "Character name or null",
+  "recognizedSeries": "Series name or null",
+  "editStyle": "Edit style or vibe",
   "keyInsights": ["Insight 1", "Insight 2", "Insight 3"],
   "groundedTrends": [
     {
@@ -40,18 +57,22 @@ Return strictly valid JSON with this exact schema (no markdown fences, just pure
     }
   ],
   "youtube": {
-    "title": "Catchy YouTube Title Under 100 Characters",
-    "description": "Full formatted YouTube description with emojis, spacing, call to action, and hashtags.",
-    "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-    "hashtags": ["#Shorts", "#Trending", "#Topic"],
-    "categoryId": "28",
-    "categoryName": "Science & Technology"
+    "title": "Gojo Satoru Being An Absolute Menace 🥶 | Jujutsu Kaisen 4K Edit #Shorts",
+    "description": "Full formatted description with lore, music credits, call to action, and hashtags.",
+    "tags": ["anime edit", "gojo satoru", "jujutsu kaisen", "amv", "phonk edit", "4k anime"],
+    "hashtags": ["#Shorts", "#JujutsuKaisen", "#AnimeEdit", "#GojoSatoru"],
+    "categoryId": "1",
+    "categoryName": "Film & Animation",
+    "language": "en",
+    "isShorts": true
   },
   "instagram": {
     "hookSentence": "First 3-second visual or audio hook text",
     "caption": "Full Instagram Reels caption with line breaks and call to action.",
-    "hashtags": ["#reels", "#reelsinstagram", "#explorepage", "#viral"],
-    "recommendedAudio": "Upbeat synthwave / trending phonk or lofi beat"
+    "hashtags": ["#animeedit", "#jujutsukaisen", "#amvedits", "#reelsviral", "#animetiktok"],
+    "recommendedAudio": "Trending Phonk Beat (Slowed)",
+    "suggestedLocation": "Tokyo, Japan",
+    "suggestedCollaborators": ["@animespotlight"]
   },
   "predictedGrowth": [
     { "day": 1, "label": "Day 1", "youtubeViews": 1800, "instagramViews": 3200, "searchInterest": 48 },
@@ -153,62 +174,133 @@ Search the web for what is currently trending around this topic in 2025/2026, fi
   }
 
   private static generateSimulatedAnalysis(topic: string, tone: string): AIAnalysisResult {
-    const sanitizedTopic = topic.length > 0 ? topic : 'Epic Behind The Scenes Creation';
-    const cleanWord = sanitizedTopic.split(' ')[0] || 'Content';
+    const rawLower = topic.toLowerCase();
+    const isAnime = /anime|gojo|satoru|jujutsu|zoro|luffy|sukuna|itadori|naruto|sasuke|demon slayer|tanjiro|amv|manga|eren|attack on titan/.test(rawLower);
+    const isMarvel = /marvel|mcu|spiderman|spider-man|peter parker|iron man|tony stark|avengers|deadpool|wolverine|thor|captain america|loki/.test(rawLower);
+    const isManhwa = /manhwa|solo leveling|sung jin[- ]?woo|jinwoo|shadow monarch|webtoon|orv|dokja|omniscient reader|tower of god|baam|tbate|arthur/.test(rawLower);
+    const isGaming = /game|gaming|valorant|jett|reyna|cod|warzone|gta|clutch|headshot|fortnite|apex|elden ring/.test(rawLower);
+
+    let character = 'Creator Character';
+    let series = 'Featured Universe';
+    let editStyle = '4K HDR Phonk Velocity';
+    let categoryId = '1';
+    let categoryName = 'Film & Animation';
+    let ytTitle = '';
+    let ytDesc = '';
+    let ytTags: string[] = [];
+    let ytHashtags: string[] = [];
+    let igCaption = '';
+    let igHashtags: string[] = [];
+    let igLocation = 'Tokyo, Japan';
+    let igCollabs = ['@animespotlight'];
+
+    if (isAnime) {
+      character = rawLower.includes('zoro') ? 'Roronoa Zoro' : rawLower.includes('sukuna') ? 'Ryomen Sukuna' : 'Gojo Satoru';
+      series = rawLower.includes('zoro') ? 'One Piece' : 'Jujutsu Kaisen';
+      editStyle = '4K HDR Flow & Phonk Velocity';
+      categoryId = '1';
+      categoryName = 'Film & Animation';
+      ytTitle = `${character} Being An Absolute Menace 🥶 | ${series} 4K Edit #Shorts`;
+      ytDesc = `Witness ${character} unleashing pure dominance in this ${series} visual edit!\n\nCharacter: ${character}\nAnime: ${series}\nStyle: ${editStyle}\nSong: Trending Phonk (Slowed)\n\nEnjoying these edits? Subscribe & like for daily anime edits!`;
+      ytTags = ['anime edit', character.toLowerCase(), series.toLowerCase(), 'amv', 'anime shorts', 'phonk anime edit', '4k anime', 'badass anime moments'];
+      ytHashtags = ['#Shorts', `#${character.replace(/\s+/g, '')}`, `#${series.replace(/\s+/g, '')}`, '#AnimeEdit'];
+      igCaption = `${character} is built different 🥶 Who could actually stand a chance against them in ${series}?\n\nSave this Reel for later & share with your anime squad! ⚔️`;
+      igHashtags = ['#animeedit', '#animereels', '#jujutsukaisen', '#amvedits', '#reelsviral'];
+      igLocation = 'Tokyo, Japan';
+      igCollabs = ['@animespotlight'];
+    } else if (isMarvel) {
+      character = rawLower.includes('iron man') ? 'Tony Stark (Iron Man)' : rawLower.includes('deadpool') ? 'Deadpool & Wolverine' : 'Peter Parker (Spider-Man)';
+      series = 'Marvel Cinematic Universe (MCU)';
+      editStyle = 'Cinematic Rec.709 Beat Sync';
+      categoryId = '24';
+      categoryName = 'Entertainment';
+      ytTitle = `${character} - Peak Marvel Cinematic Edit 🎬 [{editStyle}] #Shorts`;
+      ytDesc = `The emotional and high-stakes journey of ${character} across the Marvel Cinematic Universe!\n\nCharacter: ${character}\nFranchise: ${series}\nGrade: 4K HDR Color Master\n\nLeave a comment with your favorite Marvel scene!`;
+      ytTags = ['marvel edit', 'mcu', 'avengers edit', character.toLowerCase(), 'superhero edit', 'marvel shorts', '4k marvel'];
+      ytHashtags = ['#Shorts', '#MarvelEdit', '#MCU', '#Superhero'];
+      igCaption = `No one could have pulled this off like ${character} in ${series} 🐐\n\nMCU fans, where does this rank among your all-time top superhero moments?\n\nTag a Marvel fan who needs to rewatch this! 💥`;
+      igHashtags = ['#marveledit', '#mcu', '#spidermanedit', '#marveltok', '#avengersedit'];
+      igLocation = 'New York, NY';
+      igCollabs = ['@marvelstudios'];
+    } else if (isManhwa) {
+      character = 'Sung Jin-woo (Shadow Monarch)';
+      series = 'Solo Leveling';
+      editStyle = 'Dark Orchestral Motion Webtoon Sync';
+      categoryId = '1';
+      categoryName = 'Film & Animation';
+      ytTitle = `${character} Arises! | ${series} Manhwa Motion Edit 👑 #Shorts`;
+      ytDesc = `The unstoppable aura of ${character} from ${series}!\n\nProtagonist: ${character}\nWebtoon: ${series}\nMusic: Dark Phonk / Orchestral Trap\n\nSubscribe for more weekly manhwa & webtoon motion edits!`;
+      ytTags = ['manhwa edit', 'solo leveling', 'sung jin woo', 'webtoon edit', 'manhwa recommendation', 'shadow monarch', 'action webtoon'];
+      ytHashtags = ['#Shorts', '#SoloLeveling', '#ManhwaEdit', '#SungJinWoo'];
+      igCaption = `The aura in this chapter was unmatched 🔥 ${character} just proved why he is the Shadow Monarch in ${series}.\n\nRate this manhwa from 1 to 10 below! 👇`;
+      igHashtags = ['#manhwaedit', '#sololeveling', '#webtoonedit', '#manhwarecommendation', '#sungjinwoo'];
+      igLocation = 'Seoul, South Korea';
+      igCollabs = ['@webtoonofficial'];
+    } else if (isGaming) {
+      character = 'Jett';
+      series = 'Valorant';
+      editStyle = 'Velocity Sync & Clean Beat Transitions';
+      categoryId = '20';
+      categoryName = 'Gaming';
+      ytTitle = `${character} UNREAL Clutch | ${series} 1v5 Velocity Edit 🎯 #Shorts`;
+      ytDesc = `Insane velocity beat sync highlights featuring ${character} in ${series}!\n\nPlayer / Agent: ${character}\nGame: ${series}\nSong: Drift Phonk (Slowed + Reverb)\n\nSmash like if that flick was clean!`;
+      ytTags = ['gaming edit', 'phonk edit', 'velocity edit', 'clutch montage', 'gametok', 'clean transitions', 'gaming shorts'];
+      ytHashtags = ['#Shorts', '#GamingEdit', '#Valorant', '#Velocity'];
+      igCaption = `Wait for the beat drop on this ${character} play 😮‍💨 | ${series}\n\nCould you hit this clutch under pressure?\n\nTag your duo who needs to see this! 🎯`;
+      igHashtags = ['#gamingedit', '#phonkedit', '#gametok', '#velocityedit', '#clutch'];
+      igLocation = 'Los Angeles, CA';
+      igCollabs = ['@gamingspotlight'];
+    } else {
+      const sanitizedTopic = topic.length > 0 ? topic : 'Epic Behind The Scenes Creation';
+      const cleanWord = sanitizedTopic.split(' ')[0] || 'Content';
+      character = cleanWord;
+      series = 'Creative Studio';
+      editStyle = 'Viral Cinematic Flow';
+      ytTitle = `${sanitizedTopic} (You Won't Believe What Happened!) #Shorts`;
+      ytDesc = `Everything you need to know about ${sanitizedTopic} in 60 seconds!\n\n👇 Drop your thoughts in the comments below\n🔔 Subscribe to the channel for daily updates & behind-the-scenes!\n\n#Shorts #${cleanWord} #Viral #Trending #Creator`;
+      ytTags = [sanitizedTopic.toLowerCase(), `${cleanWord.toLowerCase()} tutorial`, 'shorts', 'viral shorts', 'trending now', 'youtube creators'];
+      ytHashtags = ['#Shorts', `#${cleanWord}`, '#Trending', '#Viral'];
+      igCaption = `Wait until the end... ✨ Here is the breakdown on ${sanitizedTopic}.\n\nSave this for later & share with a creator friend who needs to see this! 🚀\n.\nWhat do you think? Drop a comment below! 👇`;
+      igHashtags = [`#${cleanWord.toLowerCase()}`, '#reels', '#explorepage', '#trendingreels', '#viralreels'];
+      igLocation = 'New York, NY';
+      igCollabs = ['@creators'];
+    }
 
     return {
-      topic: sanitizedTopic,
+      topic: topic || 'High Reach Short-Form Video',
       detectedTone: tone === 'viral_hook' ? 'High Energy & Viral' : 'Engaging & Authentic',
+      recognizedCharacter: character,
+      recognizedSeries: series,
+      editStyle,
       keyInsights: [
         `High engagement potential in visual storytelling and quick transitions`,
         `Audience retention peaks when the hook delivers within the first 2.5 seconds`,
-        `Search volume for related topics is currently elevated across YouTube Shorts and Reels`
+        `Search volume for ${character} and ${series} is currently spiking on Shorts and Reels`
       ],
       groundedTrends: [
         {
-          query: `trending ${cleanWord} content 2026`,
-          trendingKeywords: [`#${cleanWord.toLowerCase()}`, `#creatorspotlight`, `#viraltrends`, `#behindthescenes`],
-          contextNote: 'Discovered spike in mobile search interest and short-form video engagement'
-        },
-        {
-          query: `high CTR tags for ${cleanWord}`,
-          trendingKeywords: [`#reelsviral`, `#youtubeshorts`, `#learnontiktok`, `#trendingreels`],
-          contextNote: 'Algorithm currently favoring content under 45 seconds with strong initial audio hook'
+          query: `trending ${character.toLowerCase()} ${series.toLowerCase()} edit 2026`,
+          trendingKeywords: [`#${character.replace(/\s+/g, '').toLowerCase()}`, `#${series.replace(/\s+/g, '').toLowerCase()}`, `#reelsviral`, `#youtubeshorts`],
+          contextNote: `Algorithm favoring fast-paced 4K edits with synchronized phonk beat drops`
         }
       ],
       youtube: {
-        title: `${sanitizedTopic} (You Won't Believe What Happened!) #Shorts`,
-        description: `Everything you need to know about ${sanitizedTopic} in 60 seconds!\n\n👇 Drop your thoughts in the comments below\n🔔 Subscribe to the channel for daily updates & behind-the-scenes!\n\n#Shorts #${cleanWord} #Viral #Trending #Creator`,
-        tags: [
-          sanitizedTopic.toLowerCase(),
-          `${cleanWord.toLowerCase()} tutorial`,
-          'shorts',
-          'viral shorts',
-          'trending now',
-          'youtube creators',
-          'must watch'
-        ],
-        hashtags: ['#Shorts', `#${cleanWord}`, '#Trending', '#Viral'],
-        categoryId: '28',
-        categoryName: 'Science & Technology'
+        title: ytTitle,
+        description: ytDesc,
+        tags: ytTags,
+        hashtags: ytHashtags,
+        categoryId,
+        categoryName,
+        language: 'en',
+        isShorts: true
       },
       instagram: {
-        hookSentence: `Stop scrolling! Did you already know this about ${cleanWord}? 👀`,
-        caption: `Wait until the end... ✨ Here is the breakdown on ${sanitizedTopic}.\n\nSave this for later & share with a creator friend who needs to see this! 🚀\n.\n.\nWhat do you think? Let me know in the comments below! 👇`,
-        hashtags: [
-          `#${cleanWord.toLowerCase()}`,
-          '#reels',
-          '#reelsinstagram',
-          '#reelitfeelit',
-          '#explorepage',
-          '#trendingreels',
-          '#viralreels',
-          '#instadaily',
-          '#creative',
-          '#contentcreator',
-          '#foryou'
-        ],
-        recommendedAudio: 'Trending Lofi Synth Groove (118 BPM)'
+        hookSentence: `Stop scrolling! Did you already see this ${character} scene? 👀`,
+        caption: igCaption,
+        hashtags: igHashtags,
+        recommendedAudio: 'Trending Phonk Beat (Slowed + Reverb)',
+        suggestedLocation: igLocation,
+        suggestedCollaborators: igCollabs
       },
       predictedGrowth: [
         { day: 1, label: 'Day 1', youtubeViews: 2400, instagramViews: 4100, searchInterest: 52 },

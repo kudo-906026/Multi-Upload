@@ -9,12 +9,22 @@ export interface PlatformPreset {
   userId?: string;
   platform: Platform;
   name: string;
-  fixedHashtags: string[];
+  genre?: 'anime' | 'marvel' | 'manhwa' | 'gaming' | 'cinematic' | 'custom';
+  titleTemplate?: string; // e.g. "{character} | {series} Edit 🔥 [{edit_style}] #Shorts"
+  descriptionTemplate?: string;
+  captionTemplate?: string;
+  fixedHashtags?: string[];
   descriptionFooter: string;
-  category: string; // YouTube category ID (e.g. '28' = Science & Technology)
+  tags?: string[]; // YouTube niche search tags
+  category: string; // YouTube category ID (e.g. '1' = Film & Animation, '24' = Entertainment)
   privacy: PrivacyStatus;
   tone: AITone;
   shareToFeed: boolean; // For Instagram Reels
+  madeForKids?: boolean; // For YouTube
+  language?: string; // For YouTube (e.g. 'en')
+  defaultLocation?: string; // For Instagram Reels
+  collaborators?: string[]; // For Instagram Reels
+  hashtagLimit?: number; // Configurable Instagram hashtag limit setting (default 5)
   updatedAt: string;
 }
 
@@ -31,6 +41,9 @@ export interface YouTubeGeneratedContent {
   hashtags: string[];
   categoryId: string;
   categoryName: string;
+  language?: string;
+  isShorts?: boolean;
+  scheduledPublishTime?: string;
 }
 
 export interface InstagramGeneratedContent {
@@ -39,6 +52,9 @@ export interface InstagramGeneratedContent {
   recommendedAudio: string;
   hookSentence: string;
   altText?: string;
+  suggestedLocation?: string;
+  suggestedCollaborators?: string[];
+  coverFrameOffsetSec?: number;
 }
 
 export interface SmartKeywordsResult {
@@ -89,6 +105,51 @@ export interface ConversionProgress {
   convertedUrl?: string;
 }
 
+export interface TrendingShortVideo {
+  id: string;
+  title: string;
+  channelTitle: string;
+  channelId?: string;
+  viewCount: string;
+  publishedAt: string;
+  age: string;
+  thumbnailUrl: string;
+  embedUrl: string;
+  videoUrl: string;
+  tags?: string[];
+  description?: string;
+}
+
+export interface RankedKeyword {
+  keyword: string;
+  searchVolumeScore: number; // 1 - 100
+  frequency: number; // count in top videos
+  relevance: string;
+}
+
+export interface RankedHashtag {
+  hashtag: string;
+  viralityScore: number; // 1 - 100
+  trendingReason: string;
+}
+
+export interface TitleIdea {
+  id: string;
+  title: string;
+  targetPlatform: 'youtube' | 'instagram' | 'both';
+  hookStrategy: string;
+  estimatedCtrScore: number; // 1 - 100
+}
+
+export interface NicheBreakdown {
+  trendingTitles: string[]; // trending anime, manhwa, marvel series/titles
+  trendingCharacters: string[]; // trending characters
+  trendingEditStyles: string[]; // trending edit styles
+  topSongs: { name: string; artist?: string; vibe?: string }[];
+  topHashtags: string[];
+  topKeywords: string[];
+}
+
 export interface TrendItem {
   id: string;
   topic: string;
@@ -112,12 +173,20 @@ export interface NicheTrendReport {
   region: string;
   lastUpdated: string;
   cachedUntil: string;
+  videos: TrendingShortVideo[];
+  keywords: RankedKeyword[];
+  hashtags: RankedHashtag[];
+  titleIdeas: TitleIdea[];
+  breakdown: NicheBreakdown;
   items: TrendItem[];
 }
 
 export interface AIAnalysisResult {
   topic: string;
   detectedTone: string;
+  recognizedCharacter?: string; // Character recognized by Gemini (e.g. Gojo Satoru, Sung Jin-woo, Spider-Man)
+  recognizedSeries?: string; // Series recognized by Gemini (e.g. Jujutsu Kaisen, Solo Leveling, Marvel MCU)
+  editStyle?: string; // Edit style recognized by Gemini (e.g. Phonk Velocity, 4K HDR Flow, Cinematic Beat Sync)
   keyInsights: string[];
   groundedTrends: GroundedTrend[];
   youtube: YouTubeGeneratedContent;
@@ -167,6 +236,10 @@ export interface YouTubePublishPayload {
   privacyStatus: PrivacyStatus;
   categoryId: string;
   madeForKids: boolean;
+  scheduledPublishTime?: string; // ISO 8601 string if scheduled (requires privacyStatus = 'private')
+  language?: string; // Default video language (e.g. 'en')
+  customThumbnailUrl?: string; // Base64 data URL or uploaded URL
+  isShorts?: boolean; // Flagged as YouTube Short
 }
 
 export interface InstagramPublishPayload {
@@ -174,6 +247,10 @@ export interface InstagramPublishPayload {
   hashtags: string[];
   shareToFeed: boolean;
   altText?: string;
+  location?: string; // Location name / ID
+  collaborators?: string[]; // Collaborator usernames
+  coverImageUrl?: string; // Custom cover image data URL or public URL
+  thumbOffsetMs?: number; // Video frame offset in ms for Reel cover
 }
 
 export interface ConnectedAccount {
@@ -188,6 +265,7 @@ export interface ConnectedAccount {
   expiresAt?: string; // For Instagram (ISO string)
   tokenDaysRemaining?: number; // Calculated for Instagram
   needsRefresh?: boolean;
+  hasAnalyticsScope?: boolean;
   isDefault?: boolean;
 }
 
@@ -239,6 +317,7 @@ export interface PlatformAuthStatus {
     channelTitle?: string;
     tokenExpiry?: string;
     needsReauth: boolean;
+    hasAnalyticsScope?: boolean;
     accounts: ConnectedAccount[];
   };
   instagram: {
@@ -247,6 +326,7 @@ export interface PlatformAuthStatus {
     username?: string;
     tokenDaysRemaining?: number;
     needsRefresh: boolean;
+    hasAnalyticsScope?: boolean;
     accounts: ConnectedAccount[];
   };
   developerConfig?: {
@@ -263,5 +343,156 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
   message?: string;
+}
+
+// ==========================================
+// SCHEDULING TYPES
+// ==========================================
+export type ScheduledPostStatus = 'scheduled' | 'publishing' | 'completed' | 'failed' | 'cancelled';
+
+export interface ScheduledPost {
+  id: string;
+  userId: string;
+  platform: Platform;
+  runAt: string; // ISO string (UTC)
+  timeZone: string; // e.g. "America/New_York", "UTC"
+  status: ScheduledPostStatus;
+  videoStoragePath?: string;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  title: string;
+  payload: {
+    youtube?: YouTubePublishPayload;
+    instagram?: InstagramPublishPayload;
+  };
+  selectedAccountId?: string;
+  retryCount: number;
+  maxRetries: number;
+  lastError?: string;
+  resultPostId?: string;
+  resultUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+// ==========================================
+// ANALYTICS & STATS TYPES
+// ==========================================
+export interface VideoAnalytics {
+  id: string;
+  userId?: string;
+  platform: Platform;
+  videoId: string;
+  title: string;
+  thumbnailUrl?: string;
+  videoUrl?: string;
+  publishedAt: string;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  saves: number;
+  watchTimeHours?: number;
+  avgRetentionPercent?: number;
+  first48hViews?: number;
+  first48hEngagementRate?: number;
+  tags?: string[];
+  description?: string;
+  character?: string;
+  series?: string;
+  editStyle?: string;
+  musicAudio?: string;
+  durationSeconds?: number;
+  engagementRate: number; // (likes + comments + shares + saves) / views * 100
+}
+
+export interface BestTimeSlot {
+  dayOfWeek: number; // 0 = Sun, 1 = Mon ... 6 = Sat
+  dayName: string; // "Monday", "Tuesday", etc.
+  hour: number; // 0 - 23
+  formattedTime: string; // "6:00 PM"
+  score: number; // 1 - 100
+  rationale: string;
+  audienceActivityScore: number;
+  platform: 'all' | 'youtube' | 'instagram';
+}
+
+export interface BestTimeAnalysis {
+  timeZone: string;
+  totalVideosAnalyzed: number;
+  isLowConfidence: boolean; // True if < 20 videos analyzed
+  topSlots: BestTimeSlot[];
+  heatmap: {
+    day: number; // 0 - 6
+    dayName: string;
+    hourlyScores: number[]; // 24 numbers (0 - 100)
+  }[];
+}
+
+export interface AnalyticsOverview {
+  totalViews: number;
+  totalLikes: number;
+  totalComments: number;
+  totalSharesSaves: number;
+  avgEngagementRate: number;
+  youtubeViews: number;
+  instagramViews: number;
+  viewsOverTime: {
+    date: string;
+    youtubeViews: number;
+    instagramViews: number;
+    totalViews: number;
+  }[];
+  top10Videos: VideoAnalytics[];
+  bestTimes: BestTimeAnalysis;
+  hasAnalyticsScope: {
+    youtube: boolean;
+    instagram: boolean;
+  };
+  lastSyncedAt: string;
+}
+
+// ==========================================
+// CONTENT PLANNER TYPES ("WHAT TO UPLOAD NEXT")
+// ==========================================
+export interface ContentIdea {
+  id: string;
+  title: string;
+  suggestedDay: string; // e.g. "Day 2 (Saturday)"
+  suggestedDate: string; // YYYY-MM-DD
+  timeSlot: string; // e.g. "6:30 PM"
+  platform: 'both' | 'youtube' | 'instagram';
+  character?: string;
+  series?: string;
+  editStyle?: string;
+  soundVibe?: string;
+  hookStrategy: string;
+  suggestedHashtags: string[];
+}
+
+export interface WinningFormulaPatterns {
+  series: string[];
+  characters: string[];
+  editStyles: string[];
+  optimalLengthSec: number;
+  audioTrends: string[];
+  keyTakeaways: string[];
+}
+
+export interface ContentPlannerReport {
+  niche: string;
+  patterns: WinningFormulaPatterns;
+  ideas: ContentIdea[];
+  weeklyCalendar: {
+    week: number;
+    days: {
+      date: string;
+      dayName: string;
+      scheduledPost?: ScheduledPost;
+      suggestedIdea?: ContentIdea;
+    }[];
+  }[];
+  generatedAt: string;
 }
 

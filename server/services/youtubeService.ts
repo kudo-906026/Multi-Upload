@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { google } from 'googleapis';
 import { config } from '../config.js';
 import { YouTubePublishPayload, ConnectedAccount } from '../../shared/types.js';
@@ -176,18 +177,27 @@ export class YouTubeService {
       description = `${description}\n\n#Shorts`;
     }
 
-    const requestBody = {
+    const isScheduled = Boolean(payload.scheduledPublishTime);
+    const publishAtDate = isScheduled ? new Date(payload.scheduledPublishTime!) : null;
+
+    const requestBody: any = {
       snippet: {
         title: title.slice(0, 100),
         description: description.slice(0, 5000),
         tags: payload.tags || ['Shorts', 'Viral'],
-        categoryId: payload.categoryId || '28',
+        categoryId: payload.categoryId || '1',
+        defaultLanguage: payload.language || 'en',
+        defaultAudioLanguage: payload.language || 'en',
       },
       status: {
-        privacyStatus: payload.privacyStatus || 'public',
+        privacyStatus: isScheduled ? 'private' : payload.privacyStatus || 'public',
         selfDeclaredMadeForKids: payload.madeForKids || false,
       },
     };
+
+    if (isScheduled && publishAtDate && !isNaN(publishAtDate.getTime())) {
+      requestBody.status.publishAt = publishAtDate.toISOString();
+    }
 
     onProgress(30, 'Initiating resumable upload to YouTube API...');
 
@@ -215,7 +225,45 @@ export class YouTubeService {
       throw new Error('YouTube did not return a valid video ID after upload.');
     }
 
-    onProgress(95, 'Processing YouTube Shorts video metadata...');
+    // Handle optional custom thumbnail upload
+    if (payload.customThumbnailUrl) {
+      try {
+        onProgress(92, 'Uploading custom thumbnail to YouTube...');
+        let thumbBuffer: Buffer | null = null;
+        let mime = 'image/jpeg';
+
+        if (payload.customThumbnailUrl.startsWith('data:')) {
+          const match = payload.customThumbnailUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            mime = match[1];
+            thumbBuffer = Buffer.from(match[2], 'base64');
+          }
+        } else if (fs.existsSync(payload.customThumbnailUrl)) {
+          thumbBuffer = fs.readFileSync(payload.customThumbnailUrl);
+        }
+
+        if (thumbBuffer) {
+          const tempThumbPath = path.join(process.cwd(), 'uploads', `thumb_${videoId}_${Date.now()}.jpg`);
+          fs.writeFileSync(tempThumbPath, thumbBuffer);
+          try {
+            await youtube.thumbnails.set({
+              videoId,
+              media: {
+                mimeType: mime,
+                body: fs.createReadStream(tempThumbPath),
+              },
+            });
+            console.log(`[YouTubeService] Successfully uploaded custom thumbnail for video ${videoId}`);
+          } finally {
+            if (fs.existsSync(tempThumbPath)) fs.unlinkSync(tempThumbPath);
+          }
+        }
+      } catch (thumbErr: any) {
+        console.warn(`[YouTubeService] Notice: Could not set custom thumbnail (channel may need phone verification for thumbnails):`, thumbErr.message);
+      }
+    }
+
+    onProgress(96, 'Processing YouTube Shorts video metadata...');
     const url = `https://youtube.com/shorts/${videoId}`;
     onProgress(100, `Published to YouTube channel "${creds.account.name}"!`);
 

@@ -16,49 +16,64 @@ import {
   Clock,
   AlertCircle,
   ExternalLink,
+  Layers,
+  Tag,
+  Key,
+  Play,
+  Share2,
+  Copy,
+  ChevronRight,
+  Award,
+  Zap,
 } from 'lucide-react';
-import { NicheTrendReport, TrendItem } from '@shared/types';
+import {
+  NicheTrendReport,
+  TrendingShortVideo,
+  RankedKeyword,
+  RankedHashtag,
+  TitleIdea,
+} from '@shared/types';
 import { ApiClient } from '../api';
 
 interface TrendsViewProps {
-  onUseTrendInStudio: (topic: string, hashtags: string[]) => void;
+  onUseTrendInStudio: (topic: string, hashtags: string[], title?: string, keywords?: string[]) => void;
 }
 
 const PRESET_NICHES = [
-  { id: 'gaming', label: '🎮 Gaming' },
-  { id: 'anime', label: '⛩️ Anime' },
-  { id: 'fitness', label: '💪 Fitness' },
-  { id: 'comedy', label: '😂 Comedy' },
-  { id: 'tech', label: '🚀 Tech' },
-  { id: 'food', label: '🍳 Food' },
-  { id: 'music', label: '🎵 Music' },
-  { id: 'finance', label: '📈 Finance' },
-  { id: 'lifestyle', label: '✨ Lifestyle' },
-  { id: 'beauty', label: '💄 Beauty' },
+  { id: 'anime edits (amv)', label: '⛩️ Anime edits (AMV)', query: 'anime edit' },
+  { id: 'marvel edits', label: '🛡️ Marvel edits', query: 'marvel edit' },
+  { id: 'manhwa edits', label: '👑 Manhwa edits', query: 'manhwa edit' },
+  { id: 'gaming edits', label: '🎮 Gaming Velocity', query: 'gaming velocity edit' },
+  { id: 'cinema edits', label: '🎬 Cinema Aesthetic', query: 'cinematic movie edit' },
 ];
 
 const REGIONS = [
   { code: 'US', label: '🇺🇸 United States' },
+  { code: 'JP', label: '🇯🇵 Japan' },
+  { code: 'KR', label: '🇰🇷 South Korea' },
   { code: 'GB', label: '🇬🇧 United Kingdom' },
   { code: 'CA', label: '🇨🇦 Canada' },
   { code: 'IN', label: '🇮🇳 India' },
-  { code: 'JP', label: '🇯🇵 Japan' },
   { code: 'BR', label: '🇧🇷 Brazil' },
   { code: 'DE', label: '🇩🇪 Germany' },
-  { code: 'KR', label: '🇰🇷 South Korea' },
+  { code: 'FR', label: '🇫🇷 France' },
+  { code: 'GLOBAL', label: '🌐 Global' },
 ];
 
 export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) => {
-  const [selectedNiche, setSelectedNiche] = useState('tech');
+  const [selectedNiche, setSelectedNiche] = useState('anime edits (amv)');
   const [customNicheInput, setCustomNicheInput] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('US');
 
+  const [activeFinderTab, setActiveFinderTab] = useState<'keywords' | 'hashtags' | 'titles'>('keywords');
   const [report, setReport] = useState<NicheTrendReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [copiedTag, setCopiedTag] = useState<string | null>(null);
-  const [appliedTrendTopic, setAppliedTrendTopic] = useState<string | null>(null);
+
+  // Success feedback state
+  const [copiedItem, setCopiedItem] = useState<string | null>(null);
+  const [usedFeedback, setUsedFeedback] = useState<string | null>(null);
 
   const fetchTrends = async (niche: string, region: string, refresh = false) => {
     if (refresh) setIsRefreshing(true);
@@ -74,7 +89,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
       setReport(data);
     } catch (err: any) {
       console.error('Error fetching niche trends:', err);
-      setErrorMsg(err.message || 'Failed to fetch trending topics');
+      setErrorMsg(err.message || 'Failed to fetch trending topics from YouTube Data API');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -91,319 +106,544 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
     setSelectedNiche(customNicheInput.trim().toLowerCase());
   };
 
-  const handleCopyTag = (tag: string) => {
-    navigator.clipboard.writeText(tag);
-    setCopiedTag(tag);
-    setTimeout(() => setCopiedTag(null), 2000);
+  const handleCopyText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedItem(text);
+    setTimeout(() => setCopiedItem(null), 2000);
   };
 
-  const handleUseTrend = (item: TrendItem) => {
-    setAppliedTrendTopic(item.topic);
-    onUseTrendInStudio(item.topic, item.suggestedHashtags);
-    setTimeout(() => setAppliedTrendTopic(null), 3000);
+  // Sends keyword to Studio
+  const handleUseKeywordInStudio = (kw: RankedKeyword) => {
+    onUseTrendInStudio(kw.keyword, [`#${kw.keyword.replace(/\s+/g, '')}`], undefined, [kw.keyword]);
+    setUsedFeedback(`Sent keyword "${kw.keyword}" to Studio!`);
+    setTimeout(() => setUsedFeedback(null), 3000);
   };
 
-  const formatLastUpdated = (isoDate: string) => {
-    try {
-      const date = new Date(isoDate);
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
-      return 'Recently';
-    }
+  // Sends hashtag to Studio
+  const handleUseHashtagInStudio = (h: RankedHashtag) => {
+    onUseTrendInStudio(h.hashtag, [h.hashtag]);
+    setUsedFeedback(`Sent hashtag "${h.hashtag}" to Studio!`);
+    setTimeout(() => setUsedFeedback(null), 3000);
+  };
+
+  // Sends title idea to Studio
+  const handleUseTitleInStudio = (t: TitleIdea) => {
+    onUseTrendInStudio(t.title, ['#Shorts', `#${selectedNiche.split(' ')[0]}`], t.title);
+    setUsedFeedback(`Sent title "${t.title}" to Studio!`);
+    setTimeout(() => setUsedFeedback(null), 3000);
+  };
+
+  // Sends video card to Studio
+  const handleUseVideoInStudio = (video: TrendingShortVideo) => {
+    onUseTrendInStudio(video.title, video.tags || ['#Shorts'], video.title, video.tags);
+    setUsedFeedback(`Sent video metadata to Studio!`);
+    setTimeout(() => setUsedFeedback(null), 3000);
   };
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fade-in w-full max-w-full overflow-x-hidden">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-r from-indigo-950/80 via-purple-950/50 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 sm:p-7 shadow-xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center space-x-2">
-              <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
-                <Flame className="w-5 h-5 text-amber-400 animate-pulse" />
-              </span>
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Viral Trend Finder
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in pb-12">
+      {/* Top Header Card */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 shrink-0">
+            <Flame className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-white tracking-tight">
+                Shorts Viral Radar & Trend Intelligence
               </h1>
-              <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold">
-                Gemini + YouTube Data API
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
+                YouTube Data API v3
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl">
-              Real-time viral topics, sound aesthetics, editing styles, and hashtags powered by Gemini with Google Search grounding.
+            <p className="text-xs text-slate-400 mt-0.5">
+              Real-time trending Shorts, embedded video players, search-grounded hashtags, and one-click transfer to Studio
+            </p>
+          </div>
+        </div>
+
+        {/* Refresh & Cache TTL Indicator */}
+        <div className="flex items-center gap-3 self-end md:self-auto">
+          {report && (
+            <div className="text-right text-[11px] text-slate-400 hidden sm:block">
+              <div className="flex items-center gap-1 text-slate-300">
+                <Clock className="w-3 h-3 text-indigo-400" />
+                <span>1-Hour Quota Cache</span>
+              </div>
+              <span>Updated: {new Date(report.lastUpdated).toLocaleTimeString()}</span>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => fetchTrends(selectedNiche, selectedRegion, true)}
+            disabled={isRefreshing || isLoading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-red-400' : ''}`} />
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh Trends'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Preset Niches & Region Selector Bar */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+            Preset Edit Niches (YouTube Shorts):
+          </label>
+
+          {/* Region Selector */}
+          <div className="flex items-center gap-2">
+            <Globe className="w-3.5 h-3.5 text-slate-400" />
+            <select
+              value={selectedRegion}
+              onChange={(e) => setSelectedRegion(e.target.value)}
+              className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {REGIONS.map((r) => (
+                <option key={r.code} value={r.code}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Niche Pills */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {PRESET_NICHES.map((n) => {
+            const isSelected = selectedNiche.toLowerCase() === n.id.toLowerCase();
+            return (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => setSelectedNiche(n.id)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all ${
+                  isSelected
+                    ? 'bg-gradient-to-r from-red-600 to-pink-600 text-white border-red-500 shadow-md ring-1 ring-red-400/40'
+                    : 'bg-slate-950/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+                }`}
+              >
+                {n.label}
+              </button>
+            );
+          })}
+
+          {/* Custom Search Input */}
+          <form onSubmit={handleCustomNicheSubmit} className="flex items-center gap-2 ml-auto w-full sm:w-auto">
+            <input
+              type="text"
+              value={customNicheInput}
+              onChange={(e) => setCustomNicheInput(e.target.value)}
+              placeholder="Search custom niche (e.g. phonk, boxing)..."
+              className="w-full sm:w-56 bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              type="submit"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors"
+              title="Search niche"
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Feedback Alert Banners */}
+      {errorMsg && (
+        <div className="p-4 bg-red-950/80 border border-red-800 rounded-2xl text-xs text-red-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+          <button type="button" onClick={() => setErrorMsg(null)} className="text-slate-400 hover:text-white">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {usedFeedback && (
+        <div className="p-3.5 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs flex items-center gap-2 text-emerald-200 animate-fade-in shadow-lg">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span className="font-semibold">{usedFeedback} Open Studio tab to see your fields ready!</span>
+        </div>
+      )}
+
+      {/* SECTION 1: NICHE BREAKDOWN: TRENDING TITLES, CHARACTERS, EDIT STYLES, & SONGS */}
+      {report?.breakdown && (
+        <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-indigo-950/50 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-bold text-white capitalize">
+                Trending Right Now in {report.niche} ({selectedRegion})
+              </h2>
+            </div>
+            <span className="text-[11px] text-slate-400">Search-grounded live analysis</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+            {/* Trending Series & Titles */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <span className="text-xs font-bold text-indigo-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <Youtube className="w-3.5 h-3.5" />
+                Trending Titles & Series
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {report.breakdown.trendingTitles.map((title) => (
+                  <button
+                    key={title}
+                    type="button"
+                    onClick={() =>
+                      onUseTrendInStudio(title, [`#${title.replace(/\s+/g, '')}`], `${title} Peak Aura Edit #Shorts`)
+                    }
+                    className="px-2 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-lg text-indigo-300 text-xs font-medium transition-colors text-left"
+                    title="Click to use in Studio"
+                  >
+                    + {title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Trending Characters */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <span className="text-xs font-bold text-purple-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <Award className="w-3.5 h-3.5" />
+                Dominant Characters
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {report.breakdown.trendingCharacters.map((char) => (
+                  <button
+                    key={char}
+                    type="button"
+                    onClick={() =>
+                      onUseTrendInStudio(char, [`#${char.replace(/\s+/g, '')}`], `${char} Being An Absolute Menace 🥶 #Shorts`)
+                    }
+                    className="px-2 py-1 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded-lg text-purple-300 text-xs font-medium transition-colors text-left"
+                    title="Click to use in Studio"
+                  >
+                    + {char}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Trending Edit Styles */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <Scissors className="w-3.5 h-3.5" />
+                Trending Edit Styles
+              </span>
+              <div className="space-y-1.5">
+                {report.breakdown.trendingEditStyles.slice(0, 3).map((st) => (
+                  <div
+                    key={st}
+                    className="text-xs text-slate-300 bg-slate-900 px-2 py-1 rounded-md border border-slate-800 truncate"
+                  >
+                    ⚡ {st}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Top Songs & Audio */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <span className="text-xs font-bold text-pink-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <Music className="w-3.5 h-3.5" />
+                Top Songs & Audio
+              </span>
+              <div className="space-y-1.5">
+                {report.breakdown.topSongs.slice(0, 3).map((song) => (
+                  <div
+                    key={song.name}
+                    className="text-xs text-pink-200 bg-pink-950/30 border border-pink-900/40 px-2 py-1 rounded-md truncate flex items-center justify-between"
+                  >
+                    <span className="truncate">🎵 {song.name}</span>
+                    {song.vibe && <span className="text-[10px] text-pink-400 shrink-0 ml-1">{song.vibe}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 2: EMBEDDED YOUTUBE SHORTS VIDEO CARDS (NO DOWNLOAD, EMBEDDED PLAYER) */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <Youtube className="w-5 h-5 text-red-500" />
+              <span>Real Top YouTube Shorts</span>
+              <span className="text-xs font-normal text-slate-400">
+                (Embedded players • Query: "{report?.niche || selectedNiche}")
+              </span>
+            </h2>
+            <p className="text-xs text-slate-400">
+              Fetched via YouTube Data API v3 with chart=mostPopular & search.list videoDuration=short
+            </p>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 animate-pulse">
+                <div className="w-full aspect-[9/16] bg-slate-800 rounded-xl" />
+                <div className="h-4 bg-slate-800 rounded w-3/4" />
+                <div className="h-3 bg-slate-800 rounded w-1/2" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {(report?.videos || []).map((video) => (
+              <div
+                key={video.id}
+                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between transition-all group"
+              >
+                {/* Embedded YouTube Iframe Player (No video download) */}
+                <div className="w-full aspect-[9/16] bg-black relative overflow-hidden">
+                  <iframe
+                    src={video.embedUrl}
+                    title={video.title}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="w-full h-full border-0"
+                    loading="lazy"
+                  />
+                </div>
+
+                {/* Video Info Card Body */}
+                <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+                  <div className="space-y-1.5">
+                    <h3 className="text-xs font-bold text-white line-clamp-2 group-hover:text-red-400 transition-colors">
+                      {video.title}
+                    </h3>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span className="font-medium truncate">{video.channelTitle}</span>
+                      <span className="shrink-0">{video.age}</span>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-800 text-[10px] font-mono text-slate-300">
+                      <Flame className="w-3 h-3 text-red-500" />
+                      <span>{video.viewCount}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions: Use in Studio & Watch */}
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleUseVideoInStudio(video)}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 rounded-xl text-xs font-bold transition-all active:scale-95"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Use in Studio</span>
+                    </button>
+
+                    <a
+                      href={video.videoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
+                      title="Open on YouTube"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* SECTION 3: THE THREE FINDERS (KEYWORDS, HASHTAGS, TITLE IDEAS) */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <Layers className="w-5 h-5 text-indigo-400" />
+              <span>Three Trend Finders for Studio</span>
+            </h2>
+            <p className="text-xs text-slate-400">
+              Extracted from top Shorts & ranked with Gemini and Google Search grounding
             </p>
           </div>
 
-          {/* Refresh & Cache Info */}
-          <div className="flex items-center space-x-3 shrink-0">
-            {report && (
-              <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800">
-                <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Updated: {formatLastUpdated(report.lastUpdated)} (1h cache)</span>
-              </div>
-            )}
-
+          {/* Finder Tabs */}
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
             <button
               type="button"
-              disabled={isLoading || isRefreshing}
-              onClick={() => fetchTrends(selectedNiche, selectedRegion, true)}
-              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-95 transition-all disabled:opacity-50"
-              title="Force refresh trends from Gemini Search Grounding"
+              onClick={() => setActiveFinderTab('keywords')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeFinderTab === 'keywords'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh Trends</span>
-              <span className="sm:hidden">Refresh</span>
+              <Key className="w-3.5 h-3.5" />
+              <span>Ranked Keywords</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveFinderTab('hashtags')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeFinderTab === 'hashtags'
+                  ? 'bg-pink-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Hash className="w-3.5 h-3.5" />
+              <span>Ranked Hashtags</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveFinderTab('titles')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeFinderTab === 'titles'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>High-CTR Title Ideas</span>
             </button>
           </div>
         </div>
 
-        {/* Niche & Region Selector */}
-        <div className="pt-2 border-t border-slate-800/80 space-y-3">
-          {/* Preset Chips */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            <span className="text-xs text-slate-400 mr-1 font-semibold">Niches:</span>
-            {PRESET_NICHES.map((niche) => {
-              const isSelected = selectedNiche.toLowerCase() === niche.id;
-              return (
-                <button
-                  key={niche.id}
-                  type="button"
-                  onClick={() => setSelectedNiche(niche.id)}
-                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-semibold transition-all border ${
-                    isSelected
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-md shadow-indigo-600/30'
-                      : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
-                  }`}
-                >
-                  {niche.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Custom Niche Search & Region Dropdown */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <form onSubmit={handleCustomNicheSubmit} className="flex-1 flex items-center relative">
-              <input
-                type="text"
-                placeholder="Or type any custom niche (e.g. Mechanical Keyboards, AI Tools)..."
-                value={customNicheInput}
-                onChange={(e) => setCustomNicheInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-20 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-              />
-              <Search className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
+        {/* FINDER 1: RANKED KEYWORDS */}
+        {activeFinderTab === 'keywords' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span>Extracted from top Shorts titles and tags, ordered by volume:</span>
               <button
-                type="submit"
-                className="absolute right-1 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold transition-colors"
+                type="button"
+                onClick={() => {
+                  const allKw = (report?.keywords || []).map((k) => k.keyword);
+                  onUseTrendInStudio(selectedNiche, [], undefined, allKw);
+                  setUsedFeedback('Applied all top keywords to Studio tags!');
+                }}
+                className="text-indigo-400 hover:text-indigo-300 font-bold"
               >
-                Search
+                + Apply All Top Keywords to Studio
               </button>
-            </form>
-
-            <div className="flex items-center space-x-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
-              <Globe className="w-4 h-4 text-indigo-400 shrink-0" />
-              <select
-                value={selectedRegion}
-                onChange={(e) => setSelectedRegion(e.target.value)}
-                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer"
-              >
-                {REGIONS.map((r) => (
-                  <option key={r.code} value={r.code} className="bg-slate-900 text-white">
-                    {r.label}
-                  </option>
-                ))}
-              </select>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Applied toast notification */}
-      {appliedTrendTopic && (
-        <div className="p-3 bg-emerald-950/60 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-fade-in shadow-lg">
-          <div className="flex items-center space-x-2">
-            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>
-              Applied <strong>"{appliedTrendTopic}"</strong> to Studio! Upload your video to auto-ground metadata.
-            </span>
-          </div>
-          <span className="font-semibold text-emerald-400 text-[11px]">Ready in Studio</span>
-        </div>
-      )}
-
-      {/* Error State */}
-      {errorMsg && (
-        <div className="p-4 bg-red-950/50 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-
-      {/* Loading Skeleton */}
-      {isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4 animate-pulse"
-            >
-              <div className="h-5 bg-slate-800 rounded-lg w-3/4" />
-              <div className="h-16 bg-slate-800 rounded-xl" />
-              <div className="h-8 bg-slate-800 rounded-xl w-1/2" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Trend Cards Grid */}
-      {!isLoading && report && report.items && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5">
-              <span>Trending in</span>
-              <span className="text-indigo-400 capitalize">"{report.niche}"</span>
-              <span className="text-slate-500">({report.items.length} viral insights)</span>
-            </h2>
-            <span className="text-[11px] text-slate-500">Region: {report.region}</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {report.items.map((item, idx) => {
-              const diffBadgeColor =
-                item.difficulty === 'Low'
-                  ? 'bg-emerald-950/50 text-emerald-300 border-emerald-800/60'
-                  : item.difficulty === 'Medium'
-                  ? 'bg-amber-950/50 text-amber-300 border-amber-800/60'
-                  : 'bg-rose-950/50 text-rose-300 border-rose-800/60';
-
-              return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {(report?.keywords || []).map((kw) => (
                 <div
-                  key={item.id || idx}
-                  className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 group"
+                  key={kw.keyword}
+                  className="bg-slate-950/70 border border-slate-800 hover:border-indigo-500/50 rounded-xl p-3 flex items-center justify-between gap-3 transition-colors"
                 >
-                  {/* Card Header: Topic & Difficulty */}
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 font-mono text-[11px] font-bold flex items-center justify-center shrink-0 border border-indigo-500/30">
-                          #{idx + 1}
-                        </span>
-                        <h3 className="font-bold text-white text-sm sm:text-base leading-snug group-hover:text-indigo-300 transition-colors">
-                          {item.topic}
-                        </h3>
-                      </div>
-
-                      {/* Difficulty & Competition Badge */}
-                      <div className="flex items-center space-x-1.5 shrink-0">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${diffBadgeColor}`}
-                        >
-                          {item.difficulty} Comp
-                        </span>
-                        <span className="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 font-mono">
-                          {item.searchInterest}/100 🔥
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Why It's Trending */}
-                    <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-3 rounded-xl border border-slate-800/70">
-                      {item.whyTrending}
-                    </p>
-                  </div>
-
-                  {/* Creative Suggestions (Edit Style & Audio) */}
-                  <div className="space-y-2 text-xs">
-                    {/* Suggested Edit Style */}
-                    <div className="flex items-start space-x-2 text-slate-300">
-                      <Scissors className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="text-[11px] font-semibold text-indigo-300 block">
-                          Suggested Edit Style:
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          {item.suggestedEditStyle}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Suggested Sound / Audio */}
-                    <div className="flex items-start space-x-2 text-slate-300">
-                      <Music className="w-3.5 h-3.5 text-pink-400 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="text-[11px] font-semibold text-pink-300 block">
-                          Trending Audio Style:
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          {item.suggestedAudioStyle}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* YouTube Reference if available */}
-                    {item.youtubeTrendingReference && (
-                      <div className="p-2.5 bg-red-950/20 border border-red-800/40 rounded-xl text-[11px] text-slate-300 space-y-1">
-                        <div className="flex items-center space-x-1 text-red-400 font-semibold">
-                          <Youtube className="w-3.5 h-3.5" />
-                          <span>YouTube Trending Proof:</span>
-                        </div>
-                        <p className="font-medium text-white line-clamp-1">
-                          {item.youtubeTrendingReference.title}
-                        </p>
-                        <p className="text-slate-400 text-[10px]">
-                          Channel: {item.youtubeTrendingReference.channelTitle}
-                          {item.youtubeTrendingReference.viewCount
-                            ? ` • ${Number(item.youtubeTrendingReference.viewCount).toLocaleString()} views`
-                            : ''}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Hashtags Pills */}
-                  <div>
-                    <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider block mb-1">
-                      Viral Hashtags:
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {item.suggestedHashtags.map((tag) => (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => handleCopyTag(tag)}
-                          className="px-2 py-0.5 rounded-lg text-[11px] bg-slate-950 hover:bg-slate-800 text-indigo-300 border border-indigo-500/20 font-mono transition-colors"
-                          title="Click to copy hashtag"
-                        >
-                          {copiedTag === tag ? '✓ Copied' : tag}
-                        </button>
-                      ))}
+                  <div className="space-y-0.5 truncate">
+                    <span className="text-xs font-bold text-white block truncate">{kw.keyword}</span>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                      <span>Volume: {kw.searchVolumeScore}/100</span>
+                      <span>•</span>
+                      <span>In {kw.frequency} top Shorts</span>
                     </div>
                   </div>
 
-                  {/* Card Bottom: "Use in Studio" Primary CTA */}
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-500">
-                      Competition Score: <strong className="text-slate-300">{item.competitionScore}/10</strong>
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() => handleUseTrend(item)}
-                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-95 text-white shadow-md shadow-indigo-600/20 active:scale-95 transition-all"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Use in Studio</span>
-                      <ArrowRight className="w-3 h-3 ml-0.5" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleUseKeywordInStudio(kw)}
+                    className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-xs font-bold transition-colors shrink-0 flex items-center gap-1"
+                  >
+                    <span>Use</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* FINDER 2: GROUNDED HASHTAGS */}
+        {activeFinderTab === 'hashtags' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span>Ranked with Gemini 2.5 Flash and real-time search discovery:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const allH = (report?.hashtags || []).map((h) => h.hashtag);
+                  onUseTrendInStudio(selectedNiche, allH);
+                  setUsedFeedback('Applied all top hashtags to Studio!');
+                }}
+                className="text-pink-400 hover:text-pink-300 font-bold"
+              >
+                + Apply All Top Hashtags to Studio
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {(report?.hashtags || []).map((h) => (
+                <div
+                  key={h.hashtag}
+                  className="bg-slate-950/70 border border-slate-800 hover:border-pink-500/50 rounded-xl p-3 flex items-center justify-between gap-3 transition-colors"
+                >
+                  <div className="space-y-0.5 truncate">
+                    <span className="text-xs font-bold text-pink-300 block truncate">{h.hashtag}</span>
+                    <p className="text-[10px] text-slate-400 line-clamp-1">{h.trendingReason}</p>
+                    <span className="text-[10px] font-mono text-pink-400">Virality Score: {h.viralityScore}/100</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleUseHashtagInStudio(h)}
+                    className="px-2.5 py-1 bg-pink-600/20 hover:bg-pink-600 text-pink-300 hover:text-white rounded-lg text-xs font-bold transition-colors shrink-0 flex items-center gap-1"
+                  >
+                    <span>Use</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* FINDER 3: HIGH-CTR TITLE IDEAS */}
+        {activeFinderTab === 'titles' && (
+          <div className="space-y-3">
+            <div className="text-xs text-slate-400">
+              Algorithmic title ideas designed for peak CTR on YouTube Shorts & Instagram Reels:
+            </div>
+
+            <div className="space-y-2.5">
+              {(report?.titleIdeas || []).map((idea) => (
+                <div
+                  key={idea.id}
+                  className="bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-white">{idea.title}</span>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                        {idea.estimatedCtrScore}% CTR
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Strategy: {idea.hookStrategy}</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleUseTitleInStudio(idea)}
+                    className="px-4 py-1.5 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white rounded-xl text-xs font-bold transition-colors shrink-0 flex items-center gap-1.5 self-start sm:self-auto"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Use in Studio</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
-
-export default TrendsView;

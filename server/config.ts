@@ -20,8 +20,14 @@ export const config = {
   // Encryption key for securing stored OAuth tokens at rest (AES-256-GCM)
   encryptionKey: process.env.TOKEN_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY || '',
 
+  // Secret token for protecting /api/cron/tick background scheduler endpoint
+  cronSecret: process.env.CRON_SECRET || 'omnipost_secure_cron_secret_2026',
+
   // Gemini API Key
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+
+  // YouTube Data API v3 Key
+  youtubeApiKey: process.env.YOUTUBE_API_KEY || process.env.GEMINI_API_KEY || '',
 
   // Google / YouTube Developer App Credentials
   google: {

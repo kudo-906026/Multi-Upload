@@ -32,7 +32,7 @@ export const PlatformSettingsModal: React.FC<PlatformSettingsModalProps> = ({
       const url = await ApiClient.getYouTubeAuthUrl();
       window.open(url, '_blank');
     } catch (err: any) {
-      alert(`Could not start YouTube OAuth: ${err.message}. Make sure YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET are configured.`);
+      setFeedbackMsg(`Could not start YouTube OAuth: ${err.message}. Make sure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are configured.`);
     }
   };
 
