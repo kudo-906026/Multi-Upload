@@ -15,18 +15,21 @@ export class YouTubeService {
     authenticated: boolean;
     channelTitle?: string;
     needsReauth: boolean;
+    hasAnalyticsScope?: boolean;
     accounts: ConnectedAccount[];
   }> {
     const configured = Boolean(config.google.clientId && config.google.clientSecret);
     const accounts = await AccountStorageService.getPublicAccounts(userId, 'youtube');
     const authenticated = accounts.length > 0;
     const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
+    const hasAnalyticsScope = accounts.some((a) => a.hasAnalyticsScope);
 
     return {
       configured,
       authenticated,
       channelTitle: defaultAcc ? defaultAcc.name : undefined,
       needsReauth: !authenticated && configured,
+      hasAnalyticsScope,
       accounts,
     };
   }
@@ -45,6 +48,7 @@ export class YouTubeService {
     const scopes = [
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly',
+      'https://www.googleapis.com/auth/yt-analytics.readonly',
       'https://www.googleapis.com/auth/userinfo.profile',
     ];
 
@@ -103,12 +107,18 @@ export class YouTubeService {
       );
     }
 
+    const grantedScopes = (tokens.scope as string) || '';
+    const hasAnalyticsScope =
+      grantedScopes.includes('yt-analytics.readonly') ||
+      grantedScopes.includes('youtube.readonly');
+
     const savedAccount = await AccountStorageService.saveAccount(userId, {
       platform: 'youtube',
       platformAccountId: channelId,
       name: channelTitle,
       handle: channelHandle,
       avatarUrl: avatarUrl || undefined,
+      hasAnalyticsScope,
       tokens: {
         refreshToken: refreshToken || (tokens.access_token as string),
         accessToken: tokens.access_token || '',

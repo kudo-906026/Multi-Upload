@@ -1,8 +1,8 @@
 import React from 'react';
-import { Video, Flame, History, Users } from 'lucide-react';
+import { Video, Flame, History, Users, BarChart2, Calendar } from 'lucide-react';
 import { PlatformAuthStatus } from '@shared/types';
 
-export type TabId = 'create' | 'trends' | 'queue' | 'accounts' | 'presets' | 'settings';
+export type TabId = 'create' | 'trends' | 'analytics' | 'planner' | 'queue' | 'accounts' | 'presets' | 'settings';
 
 interface BottomTabBarProps {
   activeTab: TabId;
@@ -37,6 +37,16 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({
       id: 'trends',
       label: 'Trends',
       icon: Flame,
+    },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      icon: BarChart2,
+    },
+    {
+      id: 'planner',
+      label: 'Planner',
+      icon: Calendar,
     },
     {
       id: 'queue',

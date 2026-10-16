@@ -11,6 +11,8 @@ import { PresetsManager } from './components/PresetsManager';
 import { JobQueueView } from './components/JobQueueView';
 import { PlatformSettingsModal } from './components/PlatformSettingsModal';
 import { AccountsView } from './components/AccountsView';
+import { AnalyticsView } from './components/AnalyticsView';
+import { ContentPlannerView } from './components/ContentPlannerView';
 import { DownloadAppModal } from './components/DownloadAppModal';
 import { BottomTabBar, TabId } from './components/BottomTabBar';
 import {
@@ -24,6 +26,7 @@ import {
   InstagramPublishPayload,
   UserProfile,
   AIUsageQuota,
+  ContentIdea,
 } from '@shared/types';
 import { ApiClient } from './api';
 import {
@@ -50,6 +53,7 @@ export const App: React.FC = () => {
     hashtags: string[];
     title?: string;
     keywords?: string[];
+    scheduledSlot?: { date: string; time: string; timeZone: string; title?: string };
   } | null>(null);
   const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
   const [presets, setPresets] = useState<PlatformPreset[]>([]);
@@ -273,6 +277,9 @@ export const App: React.FC = () => {
       youtubeAccountId?: string;
       instagramAccountId?: string;
     };
+    isScheduled?: boolean;
+    scheduledPublishTime?: string;
+    scheduledTimeZone?: string;
   }) => {
     if (!currentVideo) return;
 
@@ -290,9 +297,14 @@ export const App: React.FC = () => {
         },
         youtubePayload: payloads.youtubePayload,
         instagramPayload: payloads.instagramPayload,
+        isScheduled: payloads.isScheduled,
+        scheduledPublishTime: payloads.scheduledPublishTime,
+        scheduledTimeZone: payloads.scheduledTimeZone,
       });
 
-      setJobs([job, ...jobs]);
+      if (job) {
+        setJobs([job, ...jobs]);
+      }
       setActiveTab('queue');
     } catch (err: any) {
       console.error('[Publishing failed]:', err);
@@ -516,7 +528,54 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* TAB 3: Presets Manager */}
+        {/* TAB 3: Analytics & Best Time to Post */}
+        {activeTab === 'analytics' && (
+          <AnalyticsView
+            authStatus={authStatus}
+            onNavigateToStudioWithSlot={(slot) => {
+              setTrendContext({
+                topic: slot.title || 'Scheduled Post',
+                title: slot.title,
+                hashtags: ['#viral', '#shorts', '#reels'],
+                scheduledSlot: slot,
+              });
+              setActiveTab('create');
+            }}
+            onOpenAccounts={() => setActiveTab('accounts')}
+          />
+        )}
+
+        {/* TAB 4: Content Planner (What to upload next) */}
+        {activeTab === 'planner' && (
+          <ContentPlannerView
+            onOpenDraftInStudio={(idea) => {
+              setTrendContext({
+                topic: idea.character ? `${idea.character} Edit` : idea.title,
+                title: idea.title,
+                hashtags: idea.hashtags,
+                keywords: idea.character ? [idea.character, idea.editStyle || 'edit'].filter(Boolean) : undefined,
+                scheduledSlot: {
+                  date: idea.suggestedSlot.date,
+                  time: idea.suggestedSlot.time,
+                  timeZone: idea.suggestedSlot.timeZone || 'UTC',
+                  title: idea.title,
+                },
+              });
+              setActiveTab('create');
+            }}
+            onOpenScheduleSlotInStudio={(slot) => {
+              setTrendContext({
+                topic: slot.title,
+                title: slot.title,
+                hashtags: ['#viral', '#shorts', '#reels'],
+                scheduledSlot: slot,
+              });
+              setActiveTab('create');
+            }}
+          />
+        )}
+
+        {/* TAB 5: Presets Manager */}
         {activeTab === 'presets' && (
           <PresetsManager
             presets={presets}

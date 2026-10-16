@@ -22,6 +22,7 @@ export interface StoredAccountRecord {
   connectedAt: string;
   expiresAt?: string;
   isDefault?: boolean;
+  hasAnalyticsScope?: boolean;
   encryptedTokens: EncryptedPayload;
 }
 
@@ -261,6 +262,7 @@ export class AccountStorageService {
       expiresAt: record.expiresAt,
       tokenDaysRemaining,
       needsRefresh,
+      hasAnalyticsScope: Boolean(record.hasAnalyticsScope),
       isDefault: record.isDefault,
     };
   }
@@ -338,6 +340,7 @@ export class AccountStorageService {
       platformAccountId: string;
       tokens: any;
       expiresAt?: string;
+      hasAnalyticsScope?: boolean;
     }
   ): Promise<ConnectedAccount> {
     // Check if account already exists for this user with same platformAccountId
@@ -360,6 +363,7 @@ export class AccountStorageService {
       connectedAt: existing ? existing.connectedAt : new Date().toISOString(),
       expiresAt: params.expiresAt,
       isDefault: existing ? existing.isDefault : isFirstOfPlatform,
+      hasAnalyticsScope: params.hasAnalyticsScope ?? existing?.hasAnalyticsScope ?? false,
       encryptedTokens: this.encrypt(params.tokens),
     };
 

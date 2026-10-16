@@ -16,6 +16,9 @@ import {
   SmartKeywordsResult,
   AIUsageQuota,
   UserProfile,
+  ScheduledPost,
+  AnalyticsOverview,
+  ContentPlannerReport,
 } from '@shared/types';
 import { getAccessToken } from './supabase';
 
@@ -375,6 +378,9 @@ export class ApiClient {
     };
     youtubePayload?: YouTubePublishPayload;
     instagramPayload?: InstagramPublishPayload;
+    isScheduled?: boolean;
+    scheduledPublishTime?: string;
+    scheduledTimeZone?: string;
   }): Promise<PublishJob> {
     const res = await safeFetch<PublishJob>(`${BASE_URL}/publish`, {
       method: 'POST',
@@ -414,6 +420,114 @@ export class ApiClient {
   static async getMe(): Promise<UserProfile> {
     const res = await safeFetch<UserProfile>(`${BASE_URL}/user/me`);
     if (!res.data) throw new Error(res.error || 'Failed to fetch user profile');
+    return res.data;
+  }
+
+  // ==========================================
+  // SCHEDULING API METHODS
+  // ==========================================
+  static async getScheduledPosts(): Promise<ScheduledPost[]> {
+    const res = await safeFetch<ScheduledPost[]>(`${BASE_URL}/schedule`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch scheduled posts');
+    return res.data;
+  }
+
+  static async schedulePost(params: {
+    platform: Platform;
+    runAt: string;
+    timeZone: string;
+    title: string;
+    videoStoragePath?: string;
+    videoUrl?: string;
+    thumbnailUrl?: string;
+    payload: any;
+    selectedAccountId?: string;
+  }): Promise<ScheduledPost> {
+    const res = await safeFetch<ScheduledPost>(`${BASE_URL}/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to schedule post');
+    return res.data;
+  }
+
+  static async reschedulePost(id: string, runAt: string, timeZone?: string): Promise<ScheduledPost> {
+    const res = await safeFetch<ScheduledPost>(`${BASE_URL}/schedule/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runAt, timeZone }),
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to reschedule post');
+    return res.data;
+  }
+
+  static async updateScheduledPost(
+    id: string,
+    updates: {
+      title?: string;
+      caption?: string;
+      hashtags?: string[];
+      runAt?: string;
+      timeZone?: string;
+    }
+  ): Promise<ScheduledPost> {
+    const res = await safeFetch<ScheduledPost>(`${BASE_URL}/schedule/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to update scheduled post');
+    return res.data;
+  }
+
+  static async cancelScheduledPost(id: string): Promise<boolean> {
+    const res = await safeFetch<{ message: string }>(`${BASE_URL}/schedule/${id}`, {
+      method: 'DELETE',
+    });
+    return res.success;
+  }
+
+  // ==========================================
+  // ANALYTICS & STATS API METHODS
+  // ==========================================
+  static async getAnalytics(timeZone?: string): Promise<AnalyticsOverview> {
+    const tz = encodeURIComponent(timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    const res = await safeFetch<AnalyticsOverview>(`${BASE_URL}/analytics?tz=${tz}`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch analytics overview');
+    return res.data;
+  }
+
+  static async refreshAnalytics(timeZone?: string): Promise<AnalyticsOverview> {
+    const tz = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const res = await safeFetch<AnalyticsOverview>(`${BASE_URL}/analytics/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tz }),
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to refresh analytics');
+    return res.data;
+  }
+
+  // ==========================================
+  // CONTENT PLANNER API METHODS
+  // ==========================================
+  static async getContentPlan(niche?: string, timeZone?: string): Promise<ContentPlannerReport> {
+    const n = encodeURIComponent(niche || 'anime edits (amv)');
+    const tz = encodeURIComponent(timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    const res = await safeFetch<ContentPlannerReport>(`${BASE_URL}/planner?niche=${n}&tz=${tz}`);
+    if (!res.data) throw new Error(res.error || 'Failed to fetch content plan');
+    return res.data;
+  }
+
+  static async generateContentPlan(niche: string, timeZone?: string): Promise<ContentPlannerReport> {
+    const tz = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const res = await safeFetch<ContentPlannerReport>(`${BASE_URL}/planner/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ niche, timeZone: tz }),
+    });
+    if (!res.data) throw new Error(res.error || 'Failed to generate content plan');
     return res.data;
   }
 }

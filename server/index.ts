@@ -8,6 +8,7 @@ import apiRoutes from './routes/api.js';
 import { AccountStorageService } from './services/accountStorage.js';
 import { InstagramService } from './services/instagramService.js';
 import { JobQueueService } from './services/jobQueue.js';
+import { SchedulingService } from './services/schedulingService.js';
 import { VideoStorageService } from './storage/videoStorage.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,6 +19,14 @@ async function startServer() {
   AccountStorageService.init();
   InstagramService.initAutoRefresh();
   JobQueueService.init();
+  SchedulingService.init();
+
+  // Internal 60s background heartbeat for checking due scheduled posts
+  setInterval(() => {
+    SchedulingService.processCronTick().catch((e) => {
+      console.warn('[Server Heartbeat Cron Notice]', e.message);
+    });
+  }, 60 * 1000);
 
   const app = express();
 

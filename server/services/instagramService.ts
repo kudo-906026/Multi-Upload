@@ -30,6 +30,7 @@ export class InstagramService {
     username?: string;
     tokenDaysRemaining?: number;
     needsRefresh: boolean;
+    hasAnalyticsScope?: boolean;
     accounts: ConnectedAccount[];
   }> {
     const configured = Boolean(config.meta.appId && config.meta.appSecret);
@@ -38,6 +39,7 @@ export class InstagramService {
     const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
 
     const needsRefresh = accounts.some((a) => a.needsRefresh);
+    const hasAnalyticsScope = accounts.some((a) => a.hasAnalyticsScope);
 
     return {
       configured,
@@ -45,6 +47,7 @@ export class InstagramService {
       username: defaultAcc ? defaultAcc.name : undefined,
       tokenDaysRemaining: defaultAcc?.tokenDaysRemaining,
       needsRefresh,
+      hasAnalyticsScope,
       accounts,
     };
   }
@@ -57,6 +60,7 @@ export class InstagramService {
     const scopes = [
       'instagram_basic',
       'instagram_content_publish',
+      'instagram_business_manage_insights',
       'pages_show_list',
       'pages_read_engagement',
       'business_management',
@@ -197,12 +201,27 @@ export class InstagramService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + expiresInSec * 1000).toISOString();
 
+    let hasAnalyticsScope = false;
+    try {
+      const permRes = await axios.get(`${this.BASE_URL}/me/permissions`, {
+        params: { access_token: longLivedToken },
+        timeout: 8000,
+      });
+      const perms = permRes.data?.data || [];
+      hasAnalyticsScope = perms.some(
+        (p: any) => p.permission === 'instagram_business_manage_insights' && p.status === 'granted'
+      );
+    } catch {
+      hasAnalyticsScope = true;
+    }
+
     const saved = await AccountStorageService.saveAccount(userId, {
       platform: 'instagram',
       platformAccountId: igUserId,
       name: igName,
       handle: igUsername.startsWith('@') ? igUsername : `@${igUsername}`,
       avatarUrl,
+      hasAnalyticsScope,
       tokens: {
         longLivedToken,
         userId: igUserId,

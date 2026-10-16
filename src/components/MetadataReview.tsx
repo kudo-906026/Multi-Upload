@@ -57,13 +57,37 @@ interface MetadataReviewProps {
       youtubeAccountId?: string;
       instagramAccountId?: string;
     };
+    isScheduled?: boolean;
+    scheduledPublishTime?: string;
+    scheduledTimeZone?: string;
   }) => Promise<void> | void;
   isPublishing: boolean;
   presets: PlatformPreset[];
   authStatus?: PlatformAuthStatus | null;
   onOpenAccounts?: () => void;
-  trendContext?: { topic: string; hashtags: string[]; title?: string; keywords?: string[] } | null;
+  trendContext?: {
+    topic: string;
+    hashtags: string[];
+    title?: string;
+    keywords?: string[];
+    scheduledSlot?: { date: string; time: string; timeZone?: string };
+  } | null;
 }
+
+const COMMON_TIMEZONES = [
+  { value: 'America/New_York', label: '🇺🇸 New York (ET)' },
+  { value: 'America/Chicago', label: '🇺🇸 Chicago (CT)' },
+  { value: 'America/Denver', label: '🇺🇸 Denver (MT)' },
+  { value: 'America/Los_Angeles', label: '🇺🇸 Los Angeles (PT)' },
+  { value: 'Europe/London', label: '🇬🇧 London (GMT/BST)' },
+  { value: 'Europe/Paris', label: '🇫🇷 Paris (CET)' },
+  { value: 'Europe/Berlin', label: '🇩🇪 Berlin (CET)' },
+  { value: 'Asia/Tokyo', label: '🇯🇵 Tokyo (JST)' },
+  { value: 'Asia/Seoul', label: '🇰🇷 Seoul (KST)' },
+  { value: 'Asia/Kolkata', label: '🇮🇳 India (IST)' },
+  { value: 'Australia/Sydney', label: '🇦🇺 Sydney (AEST)' },
+  { value: 'UTC', label: '🌐 UTC' },
+];
 
 const YOUTUBE_CATEGORIES = [
   { id: '1', name: 'Film & Animation (Recommended for Anime/Marvel edits)' },
@@ -142,6 +166,23 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
   const [ytScheduled, setYtScheduled] = useState(false);
   const [ytScheduleDate, setYtScheduleDate] = useState('');
   const [ytThumbnailUrl, setYtThumbnailUrl] = useState<string | null>(null);
+
+  // ==========================================
+  // MASTER SCHEDULING CONTROLS ("Post Now / Schedule")
+  // ==========================================
+  const [publishingMode, setPublishingMode] = useState<'now' | 'schedule'>('now');
+  const [scheduleDate, setScheduleDate] = useState<string>(() => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    return tomorrow.toISOString().split('T')[0];
+  });
+  const [scheduleTime, setScheduleTime] = useState<string>('18:00'); // 6:00 PM default prime time
+  const [scheduleTimeZone, setScheduleTimeZone] = useState<string>(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+      return 'UTC';
+    }
+  });
 
   // ==========================================
   // INSTAGRAM REELS UPLOAD SCREEN FORM STATE
@@ -231,6 +272,27 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
           });
           return updated;
         });
+      }
+      if (trendContext.scheduledSlot) {
+        setPublishingMode('schedule');
+        if (trendContext.scheduledSlot.date) {
+          setScheduleDate(trendContext.scheduledSlot.date);
+        }
+        if (trendContext.scheduledSlot.time) {
+          let t = trendContext.scheduledSlot.time;
+          if (t.includes('PM') || t.includes('AM')) {
+            const isPM = t.includes('PM');
+            const clean = t.replace(/(AM|PM|\s)/g, '');
+            const [h, m] = clean.split(':').map((x) => parseInt(x, 10));
+            const hour = isPM ? (h % 12) + 12 : h % 12;
+            setScheduleTime(`${String(hour).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`);
+          } else {
+            setScheduleTime(t);
+          }
+        }
+        if (trendContext.scheduledSlot.timeZone) {
+          setScheduleTimeZone(trendContext.scheduledSlot.timeZone);
+        }
       }
       setPresetAppliedMsg(`Applied trend "${trendContext.title || trendContext.topic}" to Studio fields!`);
       setTimeout(() => setPresetAppliedMsg(null), 3000);
@@ -432,6 +494,11 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
       instagramPayload?: InstagramPublishPayload;
     } = {};
 
+    const isSched = publishingMode === 'schedule';
+    const targetDateTimeIso = isSched && scheduleDate && scheduleTime
+      ? new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString()
+      : undefined;
+
     if (selectedPlatforms.includes('youtube')) {
       let finalTitle = ytTitle.trim();
       if (isDetectedShorts && !finalTitle.toLowerCase().includes('#shorts')) {
@@ -442,10 +509,10 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
         title: finalTitle,
         description: ytDescription.trim(),
         tags: ytTags,
-        privacyStatus: ytScheduled ? 'private' : ytPrivacy,
+        privacyStatus: isSched ? 'private' : ytPrivacy,
         categoryId: ytCategory,
         madeForKids: ytMadeForKids,
-        scheduledPublishTime: ytScheduled && ytScheduleDate ? new Date(ytScheduleDate).toISOString() : undefined,
+        scheduledPublishTime: isSched ? targetDateTimeIso : undefined,
         language: ytLanguage,
         customThumbnailUrl: ytThumbnailUrl || undefined,
         isShorts: isDetectedShorts,
@@ -468,6 +535,9 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
     try {
       await onPublish({
         ...payloads,
+        isScheduled: isSched,
+        scheduledPublishTime: targetDateTimeIso,
+        scheduledTimeZone: isSched ? scheduleTimeZone : undefined,
         selectedAccounts: {
           youtubeAccountId: selectedPlatforms.includes('youtube') ? selectedYtAccountId || undefined : undefined,
           instagramAccountId: selectedPlatforms.includes('instagram') ? selectedIgAccountId || undefined : undefined,
@@ -1529,6 +1599,126 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
       </div>
 
       {/* ================================================================ */}
+      {/* SCHEDULING MODE SELECTOR ("Post now / Schedule")                  */}
+      {/* ================================================================ */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Clock className="w-4 h-4 text-indigo-400" />
+              <span>Publication Mode</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Choose whether to launch immediately or schedule across your target accounts.
+            </p>
+          </div>
+
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setPublishingMode('now')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                publishingMode === 'now'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Post Now</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPublishingMode('schedule')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                publishingMode === 'schedule'
+                  ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Schedule</span>
+            </button>
+          </div>
+        </div>
+
+        {publishingMode === 'schedule' && (
+          <div className="space-y-4 animate-fade-in pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Date Input */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Release Date</span>
+                </label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setScheduleDate(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {/* Time Input */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Release Time</span>
+                </label>
+                <input
+                  type="time"
+                  value={scheduleTime}
+                  onChange={(e) => setScheduleTime(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {/* Time Zone Input */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Time Zone</span>
+                </label>
+                <select
+                  value={scheduleTimeZone}
+                  onChange={(e) => setScheduleTimeZone(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {COMMON_TIMEZONES.map((tz) => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Platform Mechanism Breakdown Callout */}
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs space-y-1 text-slate-400">
+              <div className="flex items-center gap-1.5 text-amber-300 font-semibold text-[11px]">
+                <Info className="w-3.5 h-3.5 shrink-0" />
+                <span>How Multi-Platform Scheduling Works</span>
+              </div>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] pl-1">
+                {selectedPlatforms.includes('youtube') && (
+                  <li>
+                    <strong className="text-red-400">YouTube:</strong> Uploads video as private with native{' '}
+                    <code className="text-slate-200">status.publishAt</code> so YouTube servers publish on time.
+                  </li>
+                )}
+                {selectedPlatforms.includes('instagram') && (
+                  <li>
+                    <strong className="text-pink-400">Instagram:</strong> Defers job in Supabase and keeps video file in storage until{' '}
+                    <span className="text-white font-mono">{scheduleTime}</span>, then publishes via background cron and automatically deletes the video.
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ================================================================ */}
       {/* FINAL PUBLISH ACTION BAR                                         */}
       {/* ================================================================ */}
       <div className="sticky bottom-0 z-20 p-4 bg-slate-900/95 backdrop-blur-md border border-slate-800 rounded-2xl shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1546,11 +1736,18 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
             )}
           </div>
           <div>
-            <div className="text-xs font-bold text-white">
-              Ready to Publish ({selectedPlatforms.join(' & ')})
+            <div className="text-xs font-bold text-white flex items-center gap-2">
+              <span>Ready to {publishingMode === 'schedule' ? 'Schedule' : 'Publish'} ({selectedPlatforms.join(' & ')})</span>
+              {publishingMode === 'schedule' && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {scheduleDate} @ {scheduleTime}
+                </span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400">
-              {selectedPlatforms.length} platform{selectedPlatforms.length > 1 ? 's' : ''} configured with verified real upload fields
+              {publishingMode === 'schedule'
+                ? `Will execute for ${selectedPlatforms.length} platform(s) at designated time`
+                : `${selectedPlatforms.length} platform(s) configured with verified real upload fields`}
             </div>
           </div>
         </div>
@@ -1562,13 +1759,20 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
           className={`inline-flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-bold text-sm text-white shadow-xl transition-all ${
             isPublishing
               ? 'bg-indigo-600/50 cursor-not-allowed'
+              : publishingMode === 'schedule'
+              ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-600/30 active:scale-95'
               : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-indigo-600/30 active:scale-95'
           }`}
         >
           {isPublishing ? (
             <>
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Sending to Platforms...</span>
+              <span>{publishingMode === 'schedule' ? 'Scheduling Post...' : 'Sending to Platforms...'}</span>
+            </>
+          ) : publishingMode === 'schedule' ? (
+            <>
+              <Clock className="w-4 h-4" />
+              <span>Schedule for {scheduleDate} at {scheduleTime}</span>
             </>
           ) : (
             <>

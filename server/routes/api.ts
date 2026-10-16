@@ -14,6 +14,9 @@ import { FFmpegService } from '../services/ffmpegService.js';
 import { TrendService } from '../services/trendService.js';
 import { OAuthStateService } from '../services/oauthStateService.js';
 import { AIUsageService } from '../services/aiUsageService.js';
+import { SchedulingService } from '../services/schedulingService.js';
+import { AnalyticsService } from '../services/analyticsService.js';
+import { ContentPlannerService } from '../services/contentPlannerService.js';
 import { requireAuth } from '../middleware/auth.js';
 import { config } from '../config.js';
 import {
@@ -228,6 +231,65 @@ router.post('/auth/instagram/callback', async (req: Request, res: Response) => {
     const account = await InstagramService.handleCallback(code, userId);
     res.json({ success: true, data: account, message: `Connected Instagram account: ${account.name}` });
   } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- Protected Background Scheduled Publishing Endpoint ---
+// Requires CRON_SECRET header or Bearer authorization to prevent unauthorized triggering
+router.post('/cron/tick', async (req: Request, res: Response) => {
+  const secretHeader = (req.headers['x-cron-secret'] as string) || '';
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const querySecret = (req.query.secret as string) || '';
+
+  const incomingSecret = secretHeader || bearerToken || querySecret;
+
+  if (!incomingSecret || incomingSecret !== config.cronSecret) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Invalid or missing CRON_SECRET header.',
+    });
+  }
+
+  try {
+    const result = await SchedulingService.processCronTick();
+    res.json({
+      success: true,
+      message: `Cron tick completed. Processed ${result.processed} scheduled posts (${result.successful} succeeded, ${result.failed} failed).`,
+      data: result,
+    });
+  } catch (err: any) {
+    console.error('[API /cron/tick Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Also allow GET for cron services that only do GET requests
+router.get('/cron/tick', async (req: Request, res: Response) => {
+  const secretHeader = (req.headers['x-cron-secret'] as string) || '';
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const querySecret = (req.query.secret as string) || '';
+
+  const incomingSecret = secretHeader || bearerToken || querySecret;
+
+  if (!incomingSecret || incomingSecret !== config.cronSecret) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Invalid or missing CRON_SECRET header.',
+    });
+  }
+
+  try {
+    const result = await SchedulingService.processCronTick();
+    res.json({
+      success: true,
+      message: `Cron tick completed. Processed ${result.processed} scheduled posts (${result.successful} succeeded, ${result.failed} failed).`,
+      data: result,
+    });
+  } catch (err: any) {
+    console.error('[API /cron/tick Error]', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -742,10 +804,19 @@ router.post('/presets/merge', async (req: Request, res: Response) => {
 });
 
 // --- Publishing & Jobs Routes (Scoped by User) ---
-router.post('/publish', (req: Request, res: Response) => {
+router.post('/publish', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const { video, targetPlatforms, selectedAccounts, youtubePayload, instagramPayload } = req.body;
+    const {
+      video,
+      targetPlatforms,
+      selectedAccounts,
+      youtubePayload,
+      instagramPayload,
+      isScheduled,
+      scheduledPublishTime,
+      scheduledTimeZone,
+    } = req.body;
 
     if (!video || !video.storagePath) {
       return res.status(400).json({ success: false, error: 'Valid video metadata is required' });
@@ -755,15 +826,64 @@ router.post('/publish', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'At least one target platform must be selected' });
     }
 
-    const job = JobQueueService.createJob(userId, {
-      video,
-      targetPlatforms,
-      selectedAccounts,
-      youtubePayload,
-      instagramPayload,
-    });
+    // If Instagram is scheduled: store in Supabase and defer execution until run_at
+    if (isScheduled && scheduledPublishTime && targetPlatforms.includes('instagram')) {
+      await SchedulingService.createScheduledPost(userId, {
+        platform: 'instagram',
+        runAt: scheduledPublishTime,
+        timeZone: scheduledTimeZone || 'UTC',
+        title: instagramPayload?.caption?.slice(0, 80) || video.originalName || 'Scheduled Reel',
+        videoStoragePath: video.storagePath,
+        videoUrl: video.publicUrl,
+        thumbnailUrl: instagramPayload?.coverImageUrl || video.thumbnailUrl,
+        payload: { instagram: instagramPayload },
+        selectedAccountId: selectedAccounts?.instagramAccountId,
+      });
+    }
 
-    res.json({ success: true, data: job });
+    // Determine platforms for immediate job execution
+    const immediatePlatforms = isScheduled && scheduledPublishTime
+      ? targetPlatforms.filter((p: string) => p !== 'instagram')
+      : targetPlatforms;
+
+    let job = null;
+    if (immediatePlatforms.length > 0) {
+      const ytPayloadWithSchedule = youtubePayload ? { ...youtubePayload } : undefined;
+      if (isScheduled && scheduledPublishTime && ytPayloadWithSchedule) {
+        ytPayloadWithSchedule.scheduledPublishTime = scheduledPublishTime;
+        ytPayloadWithSchedule.privacy = 'private';
+      }
+
+      job = JobQueueService.createJob(userId, {
+        video,
+        targetPlatforms: immediatePlatforms,
+        selectedAccounts,
+        youtubePayload: ytPayloadWithSchedule,
+        instagramPayload: isScheduled ? undefined : instagramPayload,
+      });
+
+      // Also record YouTube scheduled post in scheduled_posts so user can view all schedules in one place
+      if (isScheduled && scheduledPublishTime && immediatePlatforms.includes('youtube')) {
+        await SchedulingService.createScheduledPost(userId, {
+          platform: 'youtube',
+          runAt: scheduledPublishTime,
+          timeZone: scheduledTimeZone || 'UTC',
+          title: youtubePayload?.title || video.originalName || 'Scheduled YouTube Short',
+          videoUrl: video.publicUrl,
+          thumbnailUrl: youtubePayload?.customThumbnailUrl || video.thumbnailUrl,
+          payload: { youtube: ytPayloadWithSchedule },
+          selectedAccountId: selectedAccounts?.youtubeAccountId,
+          status: 'completed', // Handled natively by YouTube publishAt
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: job,
+      isScheduled: Boolean(isScheduled),
+      scheduledTime: scheduledPublishTime,
+    });
   } catch (err: any) {
     console.error('[PublishRoute] Publish error:', err);
     res.status(500).json({ success: false, error: err.message || 'Failed to start publish job' });
@@ -795,6 +915,135 @@ router.post('/jobs/:id/retry/:platform', async (req: Request, res: Response) => 
 
     const updatedJob = await JobQueueService.retryPlatform(userId, id, platform as Platform);
     res.json({ success: true, data: updatedJob });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// SCHEDULING ROUTES (Per-User)
+// ==========================================
+router.get('/schedule', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const posts = await SchedulingService.getScheduledPosts(userId);
+    res.json({ success: true, data: posts });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/schedule', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { platform, runAt, timeZone, title, videoStoragePath, videoUrl, thumbnailUrl, payload, selectedAccountId } = req.body;
+
+    if (!platform || !runAt) {
+      return res.status(400).json({ success: false, error: 'Platform and runAt are required for scheduling.' });
+    }
+
+    const post = await SchedulingService.createScheduledPost(userId, {
+      platform,
+      runAt,
+      timeZone: timeZone || 'UTC',
+      title: title || 'Scheduled Post',
+      videoStoragePath,
+      videoUrl,
+      thumbnailUrl,
+      payload,
+      selectedAccountId,
+    });
+
+    res.json({ success: true, data: post });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.put('/schedule/:id', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { id } = req.params;
+    const { runAt, timeZone, title, caption, hashtags } = req.body;
+
+    let updated = null;
+    if (runAt) {
+      updated = await SchedulingService.reschedule(userId, id, runAt, timeZone);
+    }
+    if (title || caption || hashtags) {
+      updated = await SchedulingService.updateScheduledPost(userId, id, { title, caption, hashtags, runAt, timeZone });
+    }
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Scheduled post not found or access denied.' });
+    }
+
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.delete('/schedule/:id', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { id } = req.params;
+    const success = await SchedulingService.cancelScheduledPost(userId, id);
+    if (!success) {
+      return res.status(404).json({ success: false, error: 'Scheduled post not found or access denied.' });
+    }
+    res.json({ success: true, message: 'Scheduled post cancelled and held video removed.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// ANALYTICS & STATS ROUTES (Per-User)
+// ==========================================
+router.get('/analytics', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const timeZone = (req.query.tz as string) || 'UTC';
+    const overview = await AnalyticsService.getOverview(userId, timeZone, false);
+    res.json({ success: true, data: overview });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/analytics/refresh', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const timeZone = (req.body.tz as string) || 'UTC';
+    const overview = await AnalyticsService.getOverview(userId, timeZone, true);
+    res.json({ success: true, data: overview });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// CONTENT PLANNER ROUTES ("WHAT TO UPLOAD NEXT")
+// ==========================================
+router.get('/planner', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const niche = (req.query.niche as string) || 'anime edits (amv)';
+    const timeZone = (req.query.tz as string) || 'UTC';
+    const plan = await ContentPlannerService.generatePlan(userId, niche, timeZone, false);
+    res.json({ success: true, data: plan });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/planner/generate', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { niche, timeZone } = req.body;
+    const plan = await ContentPlannerService.generatePlan(userId, niche || 'anime edits (amv)', timeZone || 'UTC', true);
+    res.json({ success: true, data: plan });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
