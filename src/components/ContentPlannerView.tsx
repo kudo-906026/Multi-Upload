@@ -21,7 +21,7 @@ import {
   HelpCircle,
   ExternalLink,
 } from 'lucide-react';
-import { ContentPlannerReport, ContentIdea, WinningFormulaPatterns } from '@shared/types';
+import { ContentPlannerReport, ContentIdea, WinningFormulaPatterns, CalendarDayItem } from '@shared/types';
 import { ApiClient } from '../api';
 
 interface ContentPlannerViewProps {
@@ -202,7 +202,7 @@ export const ContentPlannerView: React.FC<ContentPlannerViewProps> = ({
                 <span>Top Series & Anime</span>
               </div>
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {report.patterns.topSeries.map((s, idx) => (
+                {report.patterns.topSeries.map((s: string, idx: number) => (
                   <span
                     key={idx}
                     className="px-2 py-0.5 rounded-md bg-indigo-950/70 text-indigo-300 font-medium border border-indigo-800/60"
@@ -220,7 +220,7 @@ export const ContentPlannerView: React.FC<ContentPlannerViewProps> = ({
                 <span>Peak Retention Characters</span>
               </div>
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {report.patterns.topCharacters.map((c, idx) => (
+                {report.patterns.topCharacters.map((c: string, idx: number) => (
                   <span
                     key={idx}
                     className="px-2 py-0.5 rounded-md bg-pink-950/70 text-pink-300 font-medium border border-pink-800/60"
@@ -294,7 +294,7 @@ export const ContentPlannerView: React.FC<ContentPlannerViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(report?.ideas || []).map((idea, index) => (
+            {(report?.ideas || []).map((idea: ContentIdea, index: number) => (
               <div
                 key={idea.id || index}
                 className="bg-slate-950 border border-slate-800/90 hover:border-indigo-600/60 rounded-2xl p-4.5 flex flex-col justify-between space-y-3.5 transition-all hover:shadow-xl group"
@@ -343,7 +343,7 @@ export const ContentPlannerView: React.FC<ContentPlannerViewProps> = ({
 
                   {/* Hashtags */}
                   <div className="flex flex-wrap gap-1">
-                    {idea.hashtags.slice(0, 6).map((tag, tIdx) => (
+                    {idea.hashtags.slice(0, 6).map((tag: string, tIdx: number) => (
                       <span
                         key={tIdx}
                         className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-800"
@@ -421,8 +421,8 @@ export const ContentPlannerView: React.FC<ContentPlannerViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
             {report.weeklyCalendar
-              .filter((day) => (selectedWeek === 1 ? day.weekNumber === 1 : day.weekNumber === 2))
-              .map((day, idx) => (
+              .filter((day: CalendarDayItem) => (selectedWeek === 1 ? day.weekNumber === 1 : day.weekNumber === 2))
+              .map((day: CalendarDayItem, idx: number) => (
                 <div
                   key={idx}
                   className={`p-3 rounded-xl border flex flex-col justify-between space-y-2.5 min-h-[140px] ${

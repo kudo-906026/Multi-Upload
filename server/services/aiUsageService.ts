@@ -166,6 +166,8 @@ export class AIUsageService {
   static async getQuota(userId: string): Promise<AIUsageQuota> {
     const usage = await this.getUserUsage(userId);
     return {
+      dailyLimit: this.DAILY_LIMITS.analyze,
+      analyzeUsed: usage.analyzeCount,
       analyzeUsedToday: usage.analyzeCount,
       analyzeDailyLimit: this.DAILY_LIMITS.analyze,
       trendUsedToday: usage.trendCount,

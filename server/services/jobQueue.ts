@@ -295,6 +295,7 @@ export class JobQueueService {
       ytResult.progress = 100;
       ytResult.stage = 'Published successfully!';
       ytResult.publishedUrl = res.url;
+      ytResult.url = res.url;
       ytResult.externalId = res.videoId;
       ytResult.logs.push(`[${new Date().toLocaleTimeString()}] Live on YouTube: ${res.url}`);
 
@@ -342,6 +343,7 @@ export class JobQueueService {
       igResult.progress = 100;
       igResult.stage = 'Published successfully!';
       igResult.publishedUrl = res.url;
+      igResult.url = res.url;
       igResult.externalId = res.mediaId;
       igResult.logs.push(`[${new Date().toLocaleTimeString()}] Live on Instagram: ${res.url}`);
 

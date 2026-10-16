@@ -222,6 +222,7 @@ export interface PlatformJobResult {
   progress: number; // 0 - 100
   stage: string;
   publishedUrl?: string;
+  url?: string;
   externalId?: string;
   error?: string;
   retryCount: number;
@@ -299,6 +300,8 @@ export interface UserProfile {
 }
 
 export interface AIUsageQuota {
+  dailyLimit: number;
+  analyzeUsed: number;
   analyzeUsedToday: number;
   analyzeDailyLimit: number;
   trendUsedToday: number;
@@ -459,40 +462,62 @@ export interface AnalyticsOverview {
 export interface ContentIdea {
   id: string;
   title: string;
-  suggestedDay: string; // e.g. "Day 2 (Saturday)"
-  suggestedDate: string; // YYYY-MM-DD
-  timeSlot: string; // e.g. "6:30 PM"
+  suggestedDay?: string; // e.g. "Day 2 (Saturday)"
+  suggestedDate?: string; // YYYY-MM-DD
+  timeSlot?: string; // e.g. "6:30 PM"
   platform: 'both' | 'youtube' | 'instagram';
   character?: string;
   series?: string;
   editStyle?: string;
   soundVibe?: string;
-  hookStrategy: string;
-  suggestedHashtags: string[];
+  hookStrategy?: string;
+  suggestedHashtags?: string[];
+  hashtags: string[];
+  suggestedSlot: {
+    date: string;
+    time: string;
+    timeZone?: string;
+    dayName?: string;
+  };
+  estimatedViewsRange?: string;
+  hookConcept?: string;
 }
 
 export interface WinningFormulaPatterns {
-  series: string[];
-  characters: string[];
-  editStyles: string[];
-  optimalLengthSec: number;
-  audioTrends: string[];
-  keyTakeaways: string[];
+  series?: string[];
+  characters?: string[];
+  editStyles?: string[];
+  optimalLengthSec?: number | string;
+  audioTrends?: string[];
+  keyTakeaways?: string[];
+  analysisSampleCount: number;
+  avgRetentionPercent: number;
+  topSeries: string[];
+  topCharacters: string[];
+  dominantEditStyle: string;
+  bestAudioTracks: string[];
+  advice: string;
+}
+
+export interface CalendarDayItem {
+  weekNumber: number; // 1 or 2
+  dayName: string;
+  date: string;
+  isPeakDay?: boolean;
+  scheduledPost?: ScheduledPost;
+  suggestedIdea?: {
+    title: string;
+    time: string;
+    character?: string;
+    id?: string;
+  };
 }
 
 export interface ContentPlannerReport {
   niche: string;
   patterns: WinningFormulaPatterns;
   ideas: ContentIdea[];
-  weeklyCalendar: {
-    week: number;
-    days: {
-      date: string;
-      dayName: string;
-      scheduledPost?: ScheduledPost;
-      suggestedIdea?: ContentIdea;
-    }[];
-  }[];
+  weeklyCalendar: CalendarDayItem[];
   generatedAt: string;
 }
 
