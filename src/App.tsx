@@ -280,6 +280,10 @@ export const App: React.FC = () => {
     isScheduled?: boolean;
     scheduledPublishTime?: string;
     scheduledTimeZone?: string;
+    youtubeScheduledPublishTime?: string;
+    youtubeScheduledTimeZone?: string;
+    instagramScheduledPublishTime?: string;
+    instagramScheduledTimeZone?: string;
   }) => {
     if (!currentVideo) return;
 
@@ -300,6 +304,10 @@ export const App: React.FC = () => {
         isScheduled: payloads.isScheduled,
         scheduledPublishTime: payloads.scheduledPublishTime,
         scheduledTimeZone: payloads.scheduledTimeZone,
+        youtubeScheduledPublishTime: payloads.youtubeScheduledPublishTime,
+        youtubeScheduledTimeZone: payloads.youtubeScheduledTimeZone,
+        instagramScheduledPublishTime: payloads.instagramScheduledPublishTime,
+        instagramScheduledTimeZone: payloads.instagramScheduledTimeZone,
       });
 
       if (job) {
@@ -504,6 +512,7 @@ export const App: React.FC = () => {
                 </div>
                 <MetadataReview
                   selectedPlatforms={selectedPlatforms}
+                  onTogglePlatform={handleTogglePlatform}
                   aiResult={aiResult}
                   video={currentVideo}
                   presets={presets}

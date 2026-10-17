@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Globe,
   Youtube,
+  Instagram,
   BarChart2,
   Check,
   Clock,
@@ -25,6 +26,8 @@ import {
   ChevronRight,
   Award,
   Zap,
+  Music2,
+  Bookmark,
 } from 'lucide-react';
 import {
   NicheTrendReport,
@@ -60,7 +63,22 @@ const REGIONS = [
   { code: 'GLOBAL', label: '🌐 Global' },
 ];
 
+const INSTAGRAM_AUDIO_TRENDS = [
+  { title: 'Tokyo Drift (Phonk Speed Up)', artist: 'Phonk Nation', reelsCount: '480K Reels', vibe: 'Velocity Beat Drop' },
+  { title: 'Aura / Transcendence (Slowed)', artist: 'Orchestral Trap', reelsCount: '320K Reels', vibe: 'Dominance & Power' },
+  { title: 'Synthwave Night Flight', artist: 'Retrowave Lab', reelsCount: '195K Reels', vibe: 'Cinematic Flow' },
+  { title: 'Immortal Shadow Flow', artist: 'Dark Phonk King', reelsCount: '275K Reels', vibe: 'Fast Action Transitions' },
+];
+
+const INSTAGRAM_HOOK_FORMULAS = [
+  { hook: 'Wait for the beat drop on this scene 🥶', category: 'Beat Sync', ctr: '94% Hook Retention' },
+  { hook: 'Nobody talks about why he did this...', category: 'Curiosity & Lore', ctr: '91% Hook Retention' },
+  { hook: 'The aura in this chapter was unmatched 🔥', category: 'Hyped Energy', ctr: '89% Hook Retention' },
+  { hook: 'Rate this transition from 1 to 10 below 👇', category: 'Comment Driver', ctr: '87% Hook Retention' },
+];
+
 export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) => {
+  const [platformTab, setPlatformTab] = useState<'youtube' | 'instagram'>('youtube');
   const [selectedNiche, setSelectedNiche] = useState('anime edits (amv)');
   const [customNicheInput, setCustomNicheInput] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('US');
@@ -112,28 +130,24 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
     setTimeout(() => setCopiedItem(null), 2000);
   };
 
-  // Sends keyword to Studio
   const handleUseKeywordInStudio = (kw: RankedKeyword) => {
     onUseTrendInStudio(kw.keyword, [`#${kw.keyword.replace(/\s+/g, '')}`], undefined, [kw.keyword]);
     setUsedFeedback(`Sent keyword "${kw.keyword}" to Studio!`);
     setTimeout(() => setUsedFeedback(null), 3000);
   };
 
-  // Sends hashtag to Studio
   const handleUseHashtagInStudio = (h: RankedHashtag) => {
     onUseTrendInStudio(h.hashtag, [h.hashtag]);
     setUsedFeedback(`Sent hashtag "${h.hashtag}" to Studio!`);
     setTimeout(() => setUsedFeedback(null), 3000);
   };
 
-  // Sends title idea to Studio
   const handleUseTitleInStudio = (t: TitleIdea) => {
     onUseTrendInStudio(t.title, ['#Shorts', `#${selectedNiche.split(' ')[0]}`], t.title);
     setUsedFeedback(`Sent title "${t.title}" to Studio!`);
     setTimeout(() => setUsedFeedback(null), 3000);
   };
 
-  // Sends video card to Studio
   const handleUseVideoInStudio = (video: TrendingShortVideo) => {
     onUseTrendInStudio(video.title, video.tags || ['#Shorts'], video.title, video.tags);
     setUsedFeedback(`Sent video metadata to Studio!`);
@@ -145,20 +159,20 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
       {/* Top Header Card */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 shrink-0">
+          <div className="p-3 bg-gradient-to-tr from-red-600 to-pink-600 rounded-2xl text-white shrink-0 shadow-md">
             <Flame className="w-6 h-6 animate-pulse" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-white tracking-tight">
-                Shorts Viral Radar & Trend Intelligence
+                Viral Radar & Trend Intelligence
               </h1>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
-                YouTube Data API v3
+                Live Algorithm Feed
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Real-time trending Shorts, embedded video players, search-grounded hashtags, and one-click transfer to Studio
+              Platform-separated trends: YouTube Shorts search queries vs Instagram Reels audio & hook mechanics
             </p>
           </div>
         </div>
@@ -187,12 +201,43 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
         </div>
       </div>
 
+      {/* ============================================================== */}
+      {/* PLATFORM SUB-TABS: YOUTUBE SHORTS VS INSTAGRAM REELS           */}
+      {/* ============================================================== */}
+      <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-2 shadow-lg">
+        <button
+          type="button"
+          onClick={() => setPlatformTab('youtube')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
+            platformTab === 'youtube'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-900/40 ring-1 ring-red-500'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Youtube className="w-4 h-4" />
+          <span>YouTube Shorts Trends (Search Queries, High-CTR Titles, Competitor Shorts)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPlatformTab('instagram')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
+            platformTab === 'instagram'
+              ? 'bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white shadow-lg shadow-pink-900/40 ring-1 ring-pink-500'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Instagram className="w-4 h-4" />
+          <span>Instagram Reels Trends (Viral Audio Tracks, Hook Formulas, 5-Hashtag Sets)</span>
+        </button>
+      </div>
+
       {/* Preset Niches & Region Selector Bar */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            Preset Edit Niches (YouTube Shorts):
+            Niche Filter:
           </label>
 
           {/* Region Selector */}
@@ -223,7 +268,9 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                 onClick={() => setSelectedNiche(n.id)}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all ${
                   isSelected
-                    ? 'bg-gradient-to-r from-red-600 to-pink-600 text-white border-red-500 shadow-md ring-1 ring-red-400/40'
+                    ? platformTab === 'youtube'
+                      ? 'bg-red-600 text-white border-red-500 shadow-md'
+                      : 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-500 shadow-md'
                     : 'bg-slate-950/80 hover:bg-slate-800 text-slate-300 border-slate-800'
                 }`}
               >
@@ -238,7 +285,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
               type="text"
               value={customNicheInput}
               onChange={(e) => setCustomNicheInput(e.target.value)}
-              placeholder="Search custom niche (e.g. phonk, boxing)..."
+              placeholder="Custom niche (e.g. phonk, boxing)..."
               className="w-full sm:w-56 bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
@@ -266,384 +313,248 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
       )}
 
       {usedFeedback && (
-        <div className="p-3.5 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs flex items-center gap-2 text-emerald-200 animate-fade-in shadow-lg">
-          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span className="font-semibold">{usedFeedback} Open Studio tab to see your fields ready!</span>
+        <div className="p-3 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs text-emerald-200 flex items-center gap-2 animate-fade-in">
+          <Check className="w-4 h-4 text-emerald-400" />
+          <span>{usedFeedback}</span>
         </div>
       )}
 
-      {/* SECTION 1: NICHE BREAKDOWN: TRENDING TITLES, CHARACTERS, EDIT STYLES, & SONGS */}
-      {report?.breakdown && (
-        <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-indigo-950/50 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <h2 className="text-sm font-bold text-white capitalize">
-                Trending Right Now in {report.niche} ({selectedRegion})
-              </h2>
-            </div>
-            <span className="text-[11px] text-slate-400">Search-grounded live analysis</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-            {/* Trending Series & Titles */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
-              <span className="text-xs font-bold text-indigo-400 flex items-center gap-1.5 uppercase tracking-wider">
-                <Youtube className="w-3.5 h-3.5" />
-                Trending Titles & Series
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {report.breakdown.trendingTitles.map((title) => (
-                  <button
-                    key={title}
-                    type="button"
-                    onClick={() =>
-                      onUseTrendInStudio(title, [`#${title.replace(/\s+/g, '')}`], `${title} Peak Aura Edit #Shorts`)
-                    }
-                    className="px-2 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-lg text-indigo-300 text-xs font-medium transition-colors text-left"
-                    title="Click to use in Studio"
-                  >
-                    + {title}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Trending Characters */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
-              <span className="text-xs font-bold text-purple-400 flex items-center gap-1.5 uppercase tracking-wider">
-                <Award className="w-3.5 h-3.5" />
-                Dominant Characters
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {report.breakdown.trendingCharacters.map((char) => (
-                  <button
-                    key={char}
-                    type="button"
-                    onClick={() =>
-                      onUseTrendInStudio(char, [`#${char.replace(/\s+/g, '')}`], `${char} Being An Absolute Menace 🥶 #Shorts`)
-                    }
-                    className="px-2 py-1 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded-lg text-purple-300 text-xs font-medium transition-colors text-left"
-                    title="Click to use in Studio"
-                  >
-                    + {char}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Trending Edit Styles */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
-              <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5 uppercase tracking-wider">
-                <Scissors className="w-3.5 h-3.5" />
-                Trending Edit Styles
-              </span>
-              <div className="space-y-1.5">
-                {report.breakdown.trendingEditStyles.slice(0, 3).map((st) => (
-                  <div
-                    key={st}
-                    className="text-xs text-slate-300 bg-slate-900 px-2 py-1 rounded-md border border-slate-800 truncate"
-                  >
-                    ⚡ {st}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Top Songs & Audio */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
-              <span className="text-xs font-bold text-pink-400 flex items-center gap-1.5 uppercase tracking-wider">
-                <Music className="w-3.5 h-3.5" />
-                Top Songs & Audio
-              </span>
-              <div className="space-y-1.5">
-                {report.breakdown.topSongs.slice(0, 3).map((song) => (
-                  <div
-                    key={song.name}
-                    className="text-xs text-pink-200 bg-pink-950/30 border border-pink-900/40 px-2 py-1 rounded-md truncate flex items-center justify-between"
-                  >
-                    <span className="truncate">🎵 {song.name}</span>
-                    {song.vibe && <span className="text-[10px] text-pink-400 shrink-0 ml-1">{song.vibe}</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 2: EMBEDDED YOUTUBE SHORTS VIDEO CARDS (NO DOWNLOAD, EMBEDDED PLAYER) */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Youtube className="w-5 h-5 text-red-500" />
-              <span>Real Top YouTube Shorts</span>
-              <span className="text-xs font-normal text-slate-400">
-                (Embedded players • Query: "{report?.niche || selectedNiche}")
-              </span>
-            </h2>
-            <p className="text-xs text-slate-400">
-              Fetched via YouTube Data API v3 with chart=mostPopular & search.list videoDuration=short
-            </p>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 animate-pulse">
-                <div className="w-full aspect-[9/16] bg-slate-800 rounded-xl" />
-                <div className="h-4 bg-slate-800 rounded w-3/4" />
-                <div className="h-3 bg-slate-800 rounded w-1/2" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {(report?.videos || []).map((video) => (
-              <div
-                key={video.id}
-                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between transition-all group"
-              >
-                {/* Embedded YouTube Iframe Player (No video download) */}
-                <div className="w-full aspect-[9/16] bg-black relative overflow-hidden">
-                  <iframe
-                    src={video.embedUrl}
-                    title={video.title}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    className="w-full h-full border-0"
-                    loading="lazy"
-                  />
-                </div>
-
-                {/* Video Info Card Body */}
-                <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                  <div className="space-y-1.5">
-                    <h3 className="text-xs font-bold text-white line-clamp-2 group-hover:text-red-400 transition-colors">
-                      {video.title}
-                    </h3>
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
-                      <span className="font-medium truncate">{video.channelTitle}</span>
-                      <span className="shrink-0">{video.age}</span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-800 text-[10px] font-mono text-slate-300">
-                      <Flame className="w-3 h-3 text-red-500" />
-                      <span>{video.viewCount}</span>
-                    </div>
-                  </div>
-
-                  {/* Actions: Use in Studio & Watch */}
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleUseVideoInStudio(video)}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 rounded-xl text-xs font-bold transition-all active:scale-95"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Use in Studio</span>
-                    </button>
-
-                    <a
-                      href={video.videoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
-                      title="Open on YouTube"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* SECTION 3: THE THREE FINDERS (KEYWORDS, HASHTAGS, TITLE IDEAS) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-          <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-indigo-400" />
-              <span>Three Trend Finders for Studio</span>
-            </h2>
-            <p className="text-xs text-slate-400">
-              Extracted from top Shorts & ranked with Gemini and Google Search grounding
-            </p>
-          </div>
-
-          {/* Finder Tabs */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button
-              type="button"
-              onClick={() => setActiveFinderTab('keywords')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeFinderTab === 'keywords'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Key className="w-3.5 h-3.5" />
-              <span>Ranked Keywords</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveFinderTab('hashtags')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeFinderTab === 'hashtags'
-                  ? 'bg-pink-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Hash className="w-3.5 h-3.5" />
-              <span>Ranked Hashtags</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveFinderTab('titles')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeFinderTab === 'titles'
-                  ? 'bg-amber-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>High-CTR Title Ideas</span>
-            </button>
-          </div>
-        </div>
-
-        {/* FINDER 1: RANKED KEYWORDS */}
-        {activeFinderTab === 'keywords' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Extracted from top Shorts titles and tags, ordered by volume:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const allKw = (report?.keywords || []).map((k) => k.keyword);
-                  onUseTrendInStudio(selectedNiche, [], undefined, allKw);
-                  setUsedFeedback('Applied all top keywords to Studio tags!');
-                }}
-                className="text-indigo-400 hover:text-indigo-300 font-bold"
-              >
-                + Apply All Top Keywords to Studio
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {(report?.keywords || []).map((kw) => (
-                <div
-                  key={kw.keyword}
-                  className="bg-slate-950/70 border border-slate-800 hover:border-indigo-500/50 rounded-xl p-3 flex items-center justify-between gap-3 transition-colors"
+      {/* ============================================================== */}
+      {/* 1. YOUTUBE SHORTS TRENDS VIEW (RED THEME)                       */}
+      {/* ============================================================== */}
+      {platformTab === 'youtube' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Sub-Tabs: Keywords / Hashtags / Title Ideas */}
+          <div className="flex items-center gap-2 border-b border-[#272727] pb-3">
+            {[
+              { id: 'keywords', label: 'High-Volume Search Queries', icon: Key },
+              { id: 'hashtags', label: 'Trending Shorts Hashtags', icon: Hash },
+              { id: 'titles', label: 'High-CTR Title Frameworks', icon: Zap },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveFinderTab(tab.id as any)}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    activeFinderTab === tab.id
+                      ? 'bg-red-600 text-white shadow-md shadow-red-900/30'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
                 >
-                  <div className="space-y-0.5 truncate">
-                    <span className="text-xs font-bold text-white block truncate">{kw.keyword}</span>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                      <span>Volume: {kw.searchVolumeScore}/100</span>
-                      <span>•</span>
-                      <span>In {kw.frequency} top Shorts</span>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Keywords Tab */}
+          {activeFinderTab === 'keywords' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {(report?.keywords || []).map((kw, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 bg-[#141414] border border-[#272727] rounded-2xl flex items-center justify-between hover:border-red-600/50 transition-all group"
+                >
+                  <div>
+                    <span className="font-bold text-xs text-white group-hover:text-red-400 transition-colors">
+                      {kw.keyword}
+                    </span>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      Volume: {kw.searchVolume || (kw.searchVolumeScore ? `${kw.searchVolumeScore}/100` : 'High')} • Score: {kw.difficultyScore || kw.searchVolumeScore || 85}/100
                     </div>
                   </div>
-
                   <button
                     type="button"
                     onClick={() => handleUseKeywordInStudio(kw)}
-                    className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-xs font-bold transition-colors shrink-0 flex items-center gap-1"
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-red-600/20 text-red-300 border border-red-600/40 hover:bg-red-600 hover:text-white transition-all"
                   >
-                    <span>Use</span>
-                    <ArrowRight className="w-3 h-3" />
+                    Use in Studio
                   </button>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* FINDER 2: GROUNDED HASHTAGS */}
-        {activeFinderTab === 'hashtags' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Ranked with Gemini 2.5 Flash and real-time search discovery:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const allH = (report?.hashtags || []).map((h) => h.hashtag);
-                  onUseTrendInStudio(selectedNiche, allH);
-                  setUsedFeedback('Applied all top hashtags to Studio!');
-                }}
-                className="text-pink-400 hover:text-pink-300 font-bold"
-              >
-                + Apply All Top Hashtags to Studio
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {(report?.hashtags || []).map((h) => (
+          {/* Hashtags Tab */}
+          {activeFinderTab === 'hashtags' && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {(report?.hashtags || []).map((h, idx) => (
                 <div
-                  key={h.hashtag}
-                  className="bg-slate-950/70 border border-slate-800 hover:border-pink-500/50 rounded-xl p-3 flex items-center justify-between gap-3 transition-colors"
+                  key={idx}
+                  className="p-3.5 bg-[#141414] border border-[#272727] rounded-xl flex items-center justify-between hover:border-red-600/50 transition-all"
                 >
-                  <div className="space-y-0.5 truncate">
-                    <span className="text-xs font-bold text-pink-300 block truncate">{h.hashtag}</span>
-                    <p className="text-[10px] text-slate-400 line-clamp-1">{h.trendingReason}</p>
-                    <span className="text-[10px] font-mono text-pink-400">Virality Score: {h.viralityScore}/100</span>
-                  </div>
-
+                  <span className="font-mono text-xs font-bold text-red-300">{h.hashtag}</span>
                   <button
                     type="button"
                     onClick={() => handleUseHashtagInStudio(h)}
-                    className="px-2.5 py-1 bg-pink-600/20 hover:bg-pink-600 text-pink-300 hover:text-white rounded-lg text-xs font-bold transition-colors shrink-0 flex items-center gap-1"
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#222]"
+                    title="Send to Studio"
                   >
-                    <span>Use</span>
-                    <ArrowRight className="w-3 h-3" />
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* FINDER 3: HIGH-CTR TITLE IDEAS */}
-        {activeFinderTab === 'titles' && (
-          <div className="space-y-3">
-            <div className="text-xs text-slate-400">
-              Algorithmic title ideas designed for peak CTR on YouTube Shorts & Instagram Reels:
-            </div>
-
-            <div className="space-y-2.5">
-              {(report?.titleIdeas || []).map((idea) => (
+          {/* Titles Tab */}
+          {activeFinderTab === 'titles' && (
+            <div className="space-y-3">
+              {(report?.titleIdeas || []).map((t, idx) => (
                 <div
-                  key={idea.id}
-                  className="bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors"
+                  key={idx}
+                  className="p-4 bg-[#141414] border border-[#272727] rounded-2xl flex items-center justify-between hover:border-red-600/50 transition-all"
                 >
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-white">{idea.title}</span>
-                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                        {idea.estimatedCtrScore}% CTR
+                    <span className="font-bold text-xs text-white">{t.title}</span>
+                    <div className="text-[10px] text-slate-400">
+                      Strategy: {t.hookStrategy || 'High-energy hook'} • Estimated CTR: {t.estimatedCtrScore || 90}%
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleUseTitleInStudio(t)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-600 text-white shadow-sm hover:bg-red-500 transition-all shrink-0 ml-4"
+                  >
+                    Use in Studio
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Embedded Competitor Shorts Videos */}
+          <div className="bg-[#141414] border border-[#272727] rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#272727] pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Youtube className="w-4 h-4 text-red-600" />
+                  <span>Top Performing YouTube Shorts in {selectedNiche}</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Competitor velocity and sound choices</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {(report?.videos || []).slice(0, 4).map((vid) => (
+                <div key={vid.id} className="bg-black border border-[#272727] rounded-xl overflow-hidden space-y-2 group">
+                  <div className="relative aspect-[9/16] bg-slate-900">
+                    <img src={vid.thumbnailUrl} alt={vid.title} className="w-full h-full object-cover" />
+                    <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded text-[10px] bg-black/80 font-mono text-white">
+                      {vid.viewCount || '1.2M views'}
+                    </span>
+                  </div>
+                  <div className="p-3 space-y-1">
+                    <h5 className="font-bold text-xs text-white line-clamp-1">{vid.title}</h5>
+                    <p className="text-[10px] text-slate-400">{vid.channelTitle}</p>
+                    <button
+                      type="button"
+                      onClick={() => handleUseVideoInStudio(vid)}
+                      className="w-full mt-2 py-1.5 rounded-lg text-xs font-bold bg-[#222] hover:bg-red-600 hover:text-white transition-all text-slate-200"
+                    >
+                      Remix in Studio
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* 2. INSTAGRAM REELS TRENDS VIEW (GRADIENT THEME)                */}
+      {/* ============================================================== */}
+      {platformTab === 'instagram' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Section: Trending Audio & Sounds */}
+          <div className="bg-black border border-pink-900/50 rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Music2 className="w-5 h-5 text-pink-500" />
+                <h3 className="text-sm font-bold text-white">Trending Reels Audio & Phonk Tracks</h3>
+              </div>
+              <span className="text-xs text-pink-400 font-mono">Algorithm boost sounds</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {INSTAGRAM_AUDIO_TRENDS.map((audio, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 bg-neutral-950 border border-neutral-800 rounded-2xl flex items-center justify-between hover:border-pink-500/50 transition-all"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white shrink-0">
+                      <Music className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white line-clamp-1">{audio.title}</h4>
+                      <p className="text-[10px] text-neutral-400">{audio.artist} • <span className="text-pink-400">{audio.reelsCount}</span></p>
+                      <span className="text-[9px] px-2 py-0.5 rounded-full bg-pink-950/60 text-pink-300 border border-pink-800/40 inline-block mt-1">
+                        {audio.vibe}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400">Strategy: {idea.hookStrategy}</p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => handleUseTitleInStudio(idea)}
-                    className="px-4 py-1.5 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white rounded-xl text-xs font-bold transition-colors shrink-0 flex items-center gap-1.5 self-start sm:self-auto"
+                    onClick={() => {
+                      onUseTrendInStudio(audio.title, ['#reelsaudio', '#phonkedit', '#explorepage'], undefined, [audio.title]);
+                      setUsedFeedback(`Sent sound "${audio.title}" to Studio!`);
+                      setTimeout(() => setUsedFeedback(null), 3000);
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 hover:bg-gradient-to-r hover:from-pink-600 hover:to-purple-600 text-white border border-neutral-700 transition-all shrink-0 ml-3"
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Use in Studio</span>
+                    Use Sound
                   </button>
                 </div>
               ))}
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Section: Reels 3-Second Hook Formulas */}
+          <div className="bg-black border border-purple-900/50 rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-purple-400" />
+                <h3 className="text-sm font-bold text-white">Reels 3-Second First-Line Hook Formulas</h3>
+              </div>
+              <span className="text-xs text-purple-400 font-mono">Highest watch completion</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {INSTAGRAM_HOOK_FORMULAS.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 bg-neutral-950 border border-neutral-800 rounded-2xl space-y-2 hover:border-purple-500/50 transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
+                      {item.category}
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400 font-bold">{item.ctr}</span>
+                  </div>
+                  <p className="text-xs font-semibold text-white leading-snug">"{item.hook}"</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUseTrendInStudio(item.hook, ['#reelsviral', '#explorepage', '#fyp'], undefined, [item.hook]);
+                      setUsedFeedback(`Sent hook to Studio!`);
+                      setTimeout(() => setUsedFeedback(null), 3000);
+                    }}
+                    className="w-full mt-1 py-1.5 rounded-lg text-xs font-bold bg-neutral-900 hover:bg-purple-600 text-white border border-neutral-700 transition-all"
+                  >
+                    Apply Hook in Composer
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

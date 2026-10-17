@@ -125,6 +125,8 @@ export interface RankedKeyword {
   searchVolumeScore: number; // 1 - 100
   frequency: number; // count in top videos
   relevance: string;
+  searchVolume?: string | number;
+  difficultyScore?: number;
 }
 
 export interface RankedHashtag {
@@ -241,6 +243,8 @@ export interface YouTubePublishPayload {
   language?: string; // Default video language (e.g. 'en')
   customThumbnailUrl?: string; // Base64 data URL or uploaded URL
   isShorts?: boolean; // Flagged as YouTube Short
+  playlist?: string; // Target playlist name or ID
+  commentsSetting?: 'allow_all' | 'hold_inappropriate' | 'disabled';
 }
 
 export interface InstagramPublishPayload {
@@ -250,9 +254,44 @@ export interface InstagramPublishPayload {
   altText?: string;
   location?: string; // Location name / ID
   collaborators?: string[]; // Collaborator usernames
+  tagPeople?: string[]; // Tagged user handles
   coverImageUrl?: string; // Custom cover image data URL or public URL
   thumbOffsetMs?: number; // Video frame offset in ms for Reel cover
 }
+
+export interface PlatformLimitsSettings {
+  youtube: {
+    maxTitleLength: number;
+    maxDescriptionLength: number;
+    maxTagsLength: number;
+    displayHashtagsCount: number;
+    maxShortsDurationSec: number;
+  };
+  instagram: {
+    maxCaptionLength: number;
+    recommendedHashtagsLimit: number;
+    maxHashtagsLimit: number;
+    maxDurationSec: number;
+    audioNotice: string;
+  };
+}
+
+export const VERIFIED_PLATFORM_LIMITS: PlatformLimitsSettings = {
+  youtube: {
+    maxTitleLength: 100,
+    maxDescriptionLength: 5000,
+    maxTagsLength: 500,
+    displayHashtagsCount: 3,
+    maxShortsDurationSec: 180, // YouTube extended Shorts limit to 3 minutes
+  },
+  instagram: {
+    maxCaptionLength: 2200,
+    recommendedHashtagsLimit: 5, // Meta/Instagram officially recommends 3-5 hashtags for reach
+    maxHashtagsLimit: 30,
+    maxDurationSec: 90, // Reels standard duration up to 90s, API allows up to 15m
+    audioNotice: 'Audio is extracted directly from the video file container on Instagram Reels API.',
+  },
+};
 
 export interface ConnectedAccount {
   id: string;

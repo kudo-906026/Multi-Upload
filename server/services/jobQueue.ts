@@ -255,8 +255,8 @@ export class JobQueueService {
       this.persistLocal();
       this.persistToSupabase(currentJob).catch(() => {});
 
-      // Automatically delete the uploaded video from Supabase Storage and local disk after posting
-      if (anyPublished || allPublished) {
+      // Automatically delete the uploaded video from Supabase Storage and local disk ONLY when ALL target platforms succeed
+      if (allPublished) {
         try {
           await VideoStorageService.deleteVideoAfterPosting(currentJob.video);
         } catch (cleanupErr: any) {

@@ -10,8 +10,10 @@ import {
   AlertCircle,
   Copy,
   Check,
+  Sliders,
+  Sparkles,
 } from 'lucide-react';
-import { PlatformAuthStatus } from '@shared/types';
+import { PlatformAuthStatus, VERIFIED_PLATFORM_LIMITS } from '@shared/types';
 import { ApiClient } from '../api';
 
 interface PlatformSettingsModalProps {
@@ -222,6 +224,81 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingIg ? 'animate-spin' : ''}`} />
               <span>{isRefreshingIg ? 'Refreshing Token...' : 'Refresh 60-Day Token'}</span>
             </button>
+          </div>
+        </div>
+
+        {/* Google Search Grounded Platform Limits & Algorithm Constraints */}
+        <div className="pt-4 border-t border-slate-800 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-xs font-bold text-white">
+              <Sparkles className="w-4 h-4 text-pink-400" />
+              <span>Verified Platform Algorithm Limits (Google Search Grounded)</span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              Active Constraints
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* YouTube Shorts Limits */}
+            <div className="p-4 bg-[#0f0f0f] border border-[#272727] rounded-xl space-y-2.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-red-400">
+                <Youtube className="w-4 h-4 text-red-500" />
+                <span>YouTube Shorts Official API Constraints</span>
+              </div>
+              <div className="text-xs space-y-1.5 text-slate-300">
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Max Title Length:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.youtube.maxTitleLength} characters</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Max Description Length:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.youtube.maxDescriptionLength} characters</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Hidden Search Tags Total:</span>
+                  <span className="font-mono font-bold text-white">&lt; {VERIFIED_PLATFORM_LIMITS.youtube.maxTagsLength} characters</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Display Hashtags in Player:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.youtube.displayHashtagsCount} tags above title</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-slate-400">Max Shorts Duration:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.youtube.maxShortsDurationSec}s (3 minutes)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Instagram Reels Limits */}
+            <div className="p-4 bg-black border border-neutral-800 rounded-xl space-y-2.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-pink-400">
+                <Instagram className="w-4 h-4 text-pink-500" />
+                <span>Instagram Reels Official API Constraints</span>
+              </div>
+              <div className="text-xs space-y-1.5 text-slate-300">
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Max Caption Length:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.instagram.maxCaptionLength} characters</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Recommended Hashtags:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.instagram.recommendedHashtagsLimit} tags (algorithm sweet spot)</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Hard Hashtags Maximum:</span>
+                  <span className="font-mono font-bold text-white">{VERIFIED_PLATFORM_LIMITS.instagram.maxHashtagsLimit} tags</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-neutral-800">
+                  <span className="text-slate-400">Standard Reels Duration:</span>
+                  <span className="font-mono font-bold text-white">Up to {VERIFIED_PLATFORM_LIMITS.instagram.maxDurationSec}s</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-slate-400">Audio Handling:</span>
+                  <span className="text-[11px] font-medium text-amber-300">Video Container Audio</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

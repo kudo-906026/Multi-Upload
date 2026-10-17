@@ -816,6 +816,10 @@ router.post('/publish', async (req: Request, res: Response) => {
       isScheduled,
       scheduledPublishTime,
       scheduledTimeZone,
+      youtubeScheduledPublishTime,
+      youtubeScheduledTimeZone,
+      instagramScheduledPublishTime,
+      instagramScheduledTimeZone,
     } = req.body;
 
     if (!video || !video.storagePath) {
@@ -826,12 +830,18 @@ router.post('/publish', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'At least one target platform must be selected' });
     }
 
+    const ytPublishTime = youtubeScheduledPublishTime || scheduledPublishTime;
+    const ytTz = youtubeScheduledTimeZone || scheduledTimeZone || 'UTC';
+    const igPublishTime = instagramScheduledPublishTime || scheduledPublishTime;
+    const igTz = instagramScheduledTimeZone || scheduledTimeZone || 'UTC';
+
     // If Instagram is scheduled: store in Supabase and defer execution until run_at
-    if (isScheduled && scheduledPublishTime && targetPlatforms.includes('instagram')) {
+    const isInstagramDeferred = Boolean(isScheduled && igPublishTime && targetPlatforms.includes('instagram'));
+    if (isInstagramDeferred) {
       await SchedulingService.createScheduledPost(userId, {
         platform: 'instagram',
-        runAt: scheduledPublishTime,
-        timeZone: scheduledTimeZone || 'UTC',
+        runAt: igPublishTime,
+        timeZone: igTz,
         title: instagramPayload?.caption?.slice(0, 80) || video.originalName || 'Scheduled Reel',
         videoStoragePath: video.storagePath,
         videoUrl: video.publicUrl,
@@ -842,16 +852,14 @@ router.post('/publish', async (req: Request, res: Response) => {
     }
 
     // Determine platforms for immediate job execution
-    const immediatePlatforms = isScheduled && scheduledPublishTime
-      ? targetPlatforms.filter((p: string) => p !== 'instagram')
-      : targetPlatforms;
+    const immediatePlatforms = targetPlatforms.filter((p: string) => !(p === 'instagram' && isInstagramDeferred));
 
     let job = null;
     if (immediatePlatforms.length > 0) {
       const ytPayloadWithSchedule = youtubePayload ? { ...youtubePayload } : undefined;
-      if (isScheduled && scheduledPublishTime && ytPayloadWithSchedule) {
-        ytPayloadWithSchedule.scheduledPublishTime = scheduledPublishTime;
-        ytPayloadWithSchedule.privacy = 'private';
+      if (isScheduled && ytPublishTime && ytPayloadWithSchedule) {
+        ytPayloadWithSchedule.scheduledPublishTime = ytPublishTime;
+        ytPayloadWithSchedule.privacyStatus = 'private';
       }
 
       job = JobQueueService.createJob(userId, {
@@ -859,15 +867,15 @@ router.post('/publish', async (req: Request, res: Response) => {
         targetPlatforms: immediatePlatforms,
         selectedAccounts,
         youtubePayload: ytPayloadWithSchedule,
-        instagramPayload: isScheduled ? undefined : instagramPayload,
+        instagramPayload: isInstagramDeferred ? undefined : instagramPayload,
       });
 
       // Also record YouTube scheduled post in scheduled_posts so user can view all schedules in one place
-      if (isScheduled && scheduledPublishTime && immediatePlatforms.includes('youtube')) {
+      if (isScheduled && ytPublishTime && immediatePlatforms.includes('youtube')) {
         await SchedulingService.createScheduledPost(userId, {
           platform: 'youtube',
-          runAt: scheduledPublishTime,
-          timeZone: scheduledTimeZone || 'UTC',
+          runAt: ytPublishTime,
+          timeZone: ytTz,
           title: youtubePayload?.title || video.originalName || 'Scheduled YouTube Short',
           videoUrl: video.publicUrl,
           thumbnailUrl: youtubePayload?.customThumbnailUrl || video.thumbnailUrl,

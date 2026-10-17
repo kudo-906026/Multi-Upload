@@ -381,6 +381,10 @@ export class ApiClient {
     isScheduled?: boolean;
     scheduledPublishTime?: string;
     scheduledTimeZone?: string;
+    youtubeScheduledPublishTime?: string;
+    youtubeScheduledTimeZone?: string;
+    instagramScheduledPublishTime?: string;
+    instagramScheduledTimeZone?: string;
   }): Promise<PublishJob> {
     const res = await safeFetch<PublishJob>(`${BASE_URL}/publish`, {
       method: 'POST',
