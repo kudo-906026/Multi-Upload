@@ -4,12 +4,29 @@ import { InstagramPublishPayload, ConnectedAccount } from '../../shared/types.js
 import { AccountStorageService, InstagramTokens } from './accountStorage.js';
 import { OAuthStateService } from './oauthStateService.js';
 
+/**
+ * InstagramService
+ *
+ * Implements "Instagram API with Instagram Login" (no Facebook Page or App Domains required).
+ *
+ * OAuth Authorize URL: https://www.instagram.com/oauth/authorize
+ * Scopes: instagram_business_basic, instagram_business_content_publish, instagram_business_manage_insights
+ * Token Exchange: POST https://api.instagram.com/oauth/access_token
+ * Long-Lived Token: GET https://graph.instagram.com/access_token (60 days)
+ * Refresh Token: GET https://graph.instagram.com/refresh_access_token (extends 60 days)
+ * Reels Publishing & Graph APIs: https://graph.instagram.com/v21.0
+ */
 export class InstagramService {
   private static readonly GRAPH_API_VERSION = 'v21.0';
-  private static readonly BASE_URL = `https://graph.facebook.com/${InstagramService.GRAPH_API_VERSION}`;
+  private static readonly GRAPH_BASE = `https://graph.instagram.com/${InstagramService.GRAPH_API_VERSION}`;
+  private static readonly OAUTH_AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
+  private static readonly OAUTH_TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
+  private static readonly LONG_LIVED_TOKEN_URL = 'https://graph.instagram.com/access_token';
+  private static readonly REFRESH_TOKEN_URL = 'https://graph.instagram.com/refresh_access_token';
 
   /**
    * Initializes background token renewal checks (every 6 hours).
+   * Refreshes long-lived tokens well before the 60-day expiration window.
    */
   static initAutoRefresh(): void {
     setInterval(async () => {
@@ -53,35 +70,36 @@ export class InstagramService {
   }
 
   /**
-   * Generates Meta / Instagram OAuth authorization URL with signed state.
+   * Generates Instagram OAuth authorization URL with "Instagram API with Instagram Login".
+   * Scopes: instagram_business_basic, instagram_business_content_publish, instagram_business_manage_insights
+   * No Facebook Page or App Domains required.
    */
   static getAuthUrl(userId: string, customRedirectUri?: string): string {
     const redirectUri = customRedirectUri || config.meta.redirectUri;
     const scopes = [
-      'instagram_basic',
-      'instagram_content_publish',
+      'instagram_business_basic',
+      'instagram_business_content_publish',
       'instagram_business_manage_insights',
-      'pages_show_list',
-      'pages_read_engagement',
-      'business_management',
     ].join(',');
 
     const state = OAuthStateService.signState(userId, 'instagram');
 
     return (
-      `https://www.facebook.com/${this.GRAPH_API_VERSION}/dialog/oauth?` +
+      `${this.OAUTH_AUTHORIZE_URL}?` +
       `client_id=${encodeURIComponent(config.meta.appId)}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&scope=${encodeURIComponent(scopes)}` +
       `&response_type=code` +
-      `&auth_type=rerequest` +
       `&state=${encodeURIComponent(state)}`
     );
   }
 
   /**
-   * Exchanges code for tokens, resolves Instagram Professional Account,
-   * converts to long-lived 60-day token, and saves encrypted to database for the user.
+   * Exchanges code for tokens via Instagram Login for Business:
+   * 1. Exchange code at https://api.instagram.com/oauth/access_token
+   * 2. Exchange short-lived token for 60-day long-lived token at graph.instagram.com
+   * 3. Fetch Instagram account profile directly from graph.instagram.com (NO Facebook Page needed)
+   * 4. Save encrypted to backend database
    */
   static async handleCallback(
     code: string,
@@ -90,58 +108,57 @@ export class InstagramService {
   ): Promise<ConnectedAccount> {
     const redirectUri = customRedirectUri || config.meta.redirectUri;
 
-    console.log('[InstagramService] Exchanging authorization code for access token...');
+    // Instagram redirects may append #_ or #_=_ to the query parameter or URL
+    const cleanCode = code.replace(/#.*$/, '').trim();
+
+    console.log('[InstagramService] Exchanging authorization code for Instagram access token at api.instagram.com...');
 
     // Step 1: Exchange code for short-lived User Access Token
     let shortToken = '';
+    let userIdFromToken: string | number | undefined;
+    let permissions: string[] = [];
+
     try {
-      const tokenRes = await axios.get(`${this.BASE_URL}/oauth/access_token`, {
-        params: {
-          client_id: config.meta.appId,
-          client_secret: config.meta.appSecret,
-          redirect_uri: redirectUri,
-          code,
-        },
+      const formData = new URLSearchParams();
+      formData.append('client_id', config.meta.appId);
+      formData.append('client_secret', config.meta.appSecret);
+      formData.append('grant_type', 'authorization_code');
+      formData.append('redirect_uri', redirectUri);
+      formData.append('code', cleanCode);
+
+      const tokenRes = await axios.post(this.OAUTH_TOKEN_URL, formData, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: 15000,
       });
-      shortToken = tokenRes.data?.access_token;
-    } catch (err: any) {
-      // Also try POST to api.instagram.com if configured as standalone Instagram App
-      try {
-        const formData = new URLSearchParams();
-        formData.append('client_id', config.meta.appId);
-        formData.append('client_secret', config.meta.appSecret);
-        formData.append('grant_type', 'authorization_code');
-        formData.append('redirect_uri', redirectUri);
-        formData.append('code', code);
 
-        const altRes = await axios.post('https://api.instagram.com/oauth/access_token', formData, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          timeout: 15000,
-        });
-        shortToken = altRes.data?.access_token;
-      } catch (altErr: any) {
-        throw new Error(
-          `Failed to exchange authorization code with Meta API: ${err.response?.data?.error?.message || err.message}`
-        );
-      }
+      shortToken = tokenRes.data?.access_token;
+      userIdFromToken = tokenRes.data?.user_id;
+      permissions = Array.isArray(tokenRes.data?.permissions) ? tokenRes.data.permissions : [];
+    } catch (err: any) {
+      const errorMsg =
+        err.response?.data?.error_message ||
+        err.response?.data?.error?.message ||
+        err.response?.data?.message ||
+        err.message;
+      console.error('[InstagramService] Code exchange error at api.instagram.com:', errorMsg);
+      throw new Error(`Failed to exchange authorization code with Instagram API: ${errorMsg}`);
     }
 
     if (!shortToken) {
-      throw new Error('Meta API did not return a valid access token.');
+      throw new Error('Instagram API did not return a valid access token.');
     }
 
-    // Step 2: Exchange short-lived token for Long-Lived Token (60-day validity)
+    // Step 2: Exchange short-lived token for Long-Lived Token (60-day validity) at graph.instagram.com
+    console.log('[InstagramService] Exchanging short-lived token for 60-day long-lived token at graph.instagram.com...');
     let longLivedToken = shortToken;
-    let expiresInSec = 60 * 24 * 60 * 60; // 60 days default
+    let expiresInSec = 60 * 24 * 60 * 60; // 60 days default (5,184,000 seconds)
 
     try {
-      const longRes = await axios.get(`${this.BASE_URL}/oauth/access_token`, {
+      const longRes = await axios.get(this.LONG_LIVED_TOKEN_URL, {
         params: {
-          grant_type: 'fb_exchange_token',
-          client_id: config.meta.appId,
+          grant_type: 'ig_exchange_token',
           client_secret: config.meta.appSecret,
-          fb_exchange_token: shortToken,
+          access_token: shortToken,
         },
         timeout: 15000,
       });
@@ -151,70 +168,64 @@ export class InstagramService {
         expiresInSec = longRes.data.expires_in || expiresInSec;
       }
     } catch (longErr: any) {
-      console.warn('[InstagramService] Long-lived exchange notice (using token):', longErr.message);
+      console.warn('[InstagramService] Long-lived token exchange notice (using current token):', longErr.message);
     }
 
-    // Step 3: Discover connected Instagram Business / Creator accounts
-    let igUserId = '';
+    // Step 3: Fetch Instagram Professional Account Profile directly from graph.instagram.com
+    // NO Facebook Page is needed! The token directly identifies the Instagram account.
+    console.log('[InstagramService] Fetching Instagram account profile from graph.instagram.com (no Facebook Page needed)...');
+    let igUserId = userIdFromToken ? String(userIdFromToken) : '';
     let igUsername = 'Instagram Professional';
-    let igName = 'Creator Account';
+    let igName = 'Instagram Creator';
     let avatarUrl: string | undefined;
 
     try {
-      // Find Facebook Pages owned by user, and their linked Instagram Business Accounts
-      const pagesRes = await axios.get(`${this.BASE_URL}/me/accounts`, {
+      const meRes = await axios.get(`${this.GRAPH_BASE}/me`, {
         params: {
+          fields: 'id,user_id,username,name,account_type,profile_picture_url',
           access_token: longLivedToken,
-          fields: 'id,name,instagram_business_account{id,username,name,profile_picture_url}',
         },
         timeout: 15000,
       });
 
-      const pages = pagesRes.data?.data || [];
-      const pageWithIG = pages.find((p: any) => p.instagram_business_account);
-
-      if (pageWithIG?.instagram_business_account) {
-        const ig = pageWithIG.instagram_business_account;
-        igUserId = ig.id;
-        igUsername = ig.username || igUsername;
-        igName = ig.name || igUsername;
-        avatarUrl = ig.profile_picture_url;
-      } else {
-        // Fallback: check /me directly if authenticated through Instagram Basic Display / Business Display
-        const meRes = await axios.get(`${this.BASE_URL}/me`, {
+      const profileData = meRes.data || {};
+      igUserId = profileData.user_id || profileData.id || igUserId || `ig-${Date.now()}`;
+      igUsername = profileData.username || igUsername;
+      igName = profileData.name || profileData.username || igName;
+      avatarUrl = profileData.profile_picture_url;
+    } catch (profileErr: any) {
+      console.warn('[InstagramService] /v21.0/me profile lookup notice:', profileErr.response?.data || profileErr.message);
+      // Fallback: query without version prefix or fallback to user_id from token
+      try {
+        const fallbackRes = await axios.get('https://graph.instagram.com/me', {
           params: {
+            fields: 'id,username,name,account_type,profile_picture_url',
             access_token: longLivedToken,
-            fields: 'id,username,name,profile_picture_url',
           },
           timeout: 10000,
         });
-        igUserId = meRes.data?.id || `ig-${Date.now()}`;
-        igUsername = meRes.data?.username || meRes.data?.name || 'Instagram User';
-        igName = meRes.data?.name || igUsername;
-        avatarUrl = meRes.data?.profile_picture_url;
+        const d = fallbackRes.data || {};
+        igUserId = d.user_id || d.id || igUserId;
+        igUsername = d.username || igUsername;
+        igName = d.name || d.username || igName;
+        avatarUrl = d.profile_picture_url;
+      } catch (fallbackErr: any) {
+        console.warn('[InstagramService] Fallback me lookup notice:', fallbackErr.message);
+        if (!igUserId) {
+          igUserId = `ig-${Date.now()}`;
+        }
       }
-    } catch (profileErr: any) {
-      console.warn('[InstagramService] Notice fetching IG profile details:', profileErr.message);
-      igUserId = `ig-${Date.now()}`;
     }
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + expiresInSec * 1000).toISOString();
 
-    let hasAnalyticsScope = false;
-    try {
-      const permRes = await axios.get(`${this.BASE_URL}/me/permissions`, {
-        params: { access_token: longLivedToken },
-        timeout: 8000,
-      });
-      const perms = permRes.data?.data || [];
-      hasAnalyticsScope = perms.some(
-        (p: any) => p.permission === 'instagram_business_manage_insights' && p.status === 'granted'
-      );
-    } catch {
-      hasAnalyticsScope = true;
-    }
+    const hasAnalyticsScope =
+      permissions.length > 0
+        ? permissions.includes('instagram_business_manage_insights')
+        : true; // Granted as part of the 3 requested scopes
 
+    // Step 4: Encrypt and persist tokens to backend database (AES-256-GCM)
     const saved = await AccountStorageService.saveAccount(userId, {
       platform: 'instagram',
       platformAccountId: igUserId,
@@ -231,12 +242,15 @@ export class InstagramService {
       expiresAt,
     });
 
-    console.log(`[InstagramService] Successfully connected Instagram account: "${igName}" (${saved.handle}) for user ${userId}`);
+    console.log(
+      `[InstagramService] Successfully connected Instagram account: "${igName}" (${saved.handle}) for user ${userId} using Instagram Login!`
+    );
     return saved;
   }
 
   /**
    * Refreshes an Instagram long-lived token before it expires (60-day extension).
+   * Calls GET https://graph.instagram.com/refresh_access_token
    */
   static async refreshAccountToken(
     userId: string,
@@ -248,8 +262,8 @@ export class InstagramService {
     }
 
     try {
-      console.log(`[InstagramService] Refreshing token for Instagram account "${creds.account.name}" (user: ${userId})...`);
-      const response = await axios.get('https://graph.instagram.com/refresh_access_token', {
+      console.log(`[InstagramService] Refreshing token for Instagram account "${creds.account.name}" (user: ${userId}) at graph.instagram.com...`);
+      const response = await axios.get(this.REFRESH_TOKEN_URL, {
         params: {
           grant_type: 'ig_refresh_token',
           access_token: creds.tokens.longLivedToken,
@@ -274,26 +288,49 @@ export class InstagramService {
           newExpiresAt
         );
 
-        console.log(`[InstagramService] Successfully refreshed Instagram token for "${creds.account.name}"!`);
+        console.log(`[InstagramService] Successfully refreshed Instagram token for "${creds.account.name}"! Expires in ~60 days.`);
         return { success: true, daysRemaining: 60 };
       }
       return { success: false, daysRemaining: 0, error: 'Empty token returned by Instagram Graph API' };
     } catch (err: any) {
-      const msg = err.response?.data?.error?.message || err.message;
+      const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message;
       console.error(`[InstagramService] Refresh failed for ${accountId}:`, msg);
       return { success: false, daysRemaining: 0, error: msg };
     }
   }
 
   /**
-   * Background task: Automatically refreshes tokens with fewer than 15 days remaining.
+   * Background task: Automatically refreshes tokens before the 60 days are up (for accounts with < 15 days remaining).
    */
-  static async checkAndRefreshExpiringTokens(): Promise<void> {
-    // Auto-refresh runs per active user requests
+  static async checkAndRefreshExpiringTokens(): Promise<number> {
+    const allRecords = AccountStorageService.getAllStoredAccounts();
+    const igRecords = allRecords.filter((r) => r.platform === 'instagram');
+    let refreshedCount = 0;
+    const now = Date.now();
+    const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
+
+    for (const record of igRecords) {
+      try {
+        if (!record.expiresAt) continue;
+        const expiresTime = new Date(record.expiresAt).getTime();
+        // Refresh token if fewer than 15 days left
+        if (expiresTime - now < fifteenDaysMs) {
+          console.log(`[InstagramService] Auto-refreshing expiring token for account "${record.name}" (${record.handle || record.id})...`);
+          const res = await this.refreshAccountToken(record.userId, record.id);
+          if (res.success) {
+            refreshedCount++;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[InstagramService] Failed to auto-refresh token for account ${record.id}:`, err.message);
+      }
+    }
+    return refreshedCount;
   }
 
   /**
-   * Publishes vertical video to Instagram Reels using the specific or default connected account for the user.
+   * Publishes vertical video to Instagram Reels through graph.instagram.com.
+   * Uses the user's specific or default connected account.
    */
   static async publishReel(
     publicVideoUrl: string,
@@ -304,7 +341,7 @@ export class InstagramService {
   ): Promise<{ mediaId: string; url: string }> {
     onProgress(5, 'Authenticating Instagram account credentials...');
 
-    const creds = accountId
+    let creds = accountId
       ? AccountStorageService.getAccountTokens<InstagramTokens>(userId, accountId)
       : AccountStorageService.getDefaultAccountTokens<InstagramTokens>(userId, 'instagram');
 
@@ -312,6 +349,22 @@ export class InstagramService {
       throw new Error(
         'No connected Instagram account found. Please connect your Instagram Professional account on the Accounts page first.'
       );
+    }
+
+    // Proactive token refresh if fewer than 5 days remaining before the 60 days are up
+    if (creds.account.expiresAt) {
+      const msLeft = new Date(creds.account.expiresAt).getTime() - Date.now();
+      if (msLeft < 5 * 24 * 60 * 60 * 1000) {
+        onProgress(8, 'Extending Instagram long-lived token before publish...');
+        await this.refreshAccountToken(userId, creds.account.id).catch((e) =>
+          console.warn('[InstagramService] Proactive refresh notice:', e.message)
+        );
+        // Reload fresh credentials
+        const refreshed = accountId
+          ? AccountStorageService.getAccountTokens<InstagramTokens>(userId, accountId)
+          : AccountStorageService.getDefaultAccountTokens<InstagramTokens>(userId, 'instagram');
+        if (refreshed) creds = refreshed;
+      }
     }
 
     const { longLivedToken, userId: igUserId } = creds.tokens;
@@ -356,9 +409,9 @@ export class InstagramService {
       }
     }
 
-    // Step 1: Create Media Container
+    // Step 1: Create Media Container through graph.instagram.com
     const containerRes = await axios.post(
-      `${this.BASE_URL}/${igUserId}/media`,
+      `${this.GRAPH_BASE}/${igUserId}/media`,
       null,
       {
         params: reelParams,
@@ -371,9 +424,9 @@ export class InstagramService {
       throw new Error('Failed to create Instagram media container. Check video URL and permissions.');
     }
 
-    onProgress(30, 'Video uploaded to Meta processing servers. Awaiting container readiness...');
+    onProgress(30, 'Video uploaded to Instagram processing servers. Awaiting container readiness...');
 
-    // Step 2: Poll container status until FINISHED
+    // Step 2: Poll container status until FINISHED through graph.instagram.com
     let status = 'IN_PROGRESS';
     let pollAttempts = 0;
     const maxPollAttempts = 40;
@@ -383,7 +436,7 @@ export class InstagramService {
       pollAttempts++;
 
       try {
-        const statusRes = await axios.get(`${this.BASE_URL}/${creationId}`, {
+        const statusRes = await axios.get(`${this.GRAPH_BASE}/${creationId}`, {
           params: {
             fields: 'status_code,status',
             access_token: longLivedToken,
@@ -393,10 +446,10 @@ export class InstagramService {
 
         status = statusRes.data?.status_code || statusRes.data?.status || 'IN_PROGRESS';
         const progress = Math.min(85, 30 + pollAttempts * 2);
-        onProgress(progress, `Meta video transcoding & audio sync: ${status} (${progress}%)...`);
+        onProgress(progress, `Instagram video transcoding & audio sync: ${status} (${progress}%)...`);
 
         if (status === 'ERROR' || status === 'EXPIRED') {
-          throw new Error(`Meta container encoding failed with status: ${status}`);
+          throw new Error(`Instagram container encoding failed with status: ${status}`);
         }
       } catch (pollErr: any) {
         console.warn(`[InstagramService] Poll attempt ${pollAttempts} warning:`, pollErr.message);
@@ -407,11 +460,11 @@ export class InstagramService {
       throw new Error('Timed out waiting for Instagram to transcode video container.');
     }
 
-    // Step 3: Publish Media Container
+    // Step 3: Publish Media Container through graph.instagram.com
     onProgress(90, 'Publishing Reel to Instagram feed & profile...');
 
     const publishRes = await axios.post(
-      `${this.BASE_URL}/${igUserId}/media_publish`,
+      `${this.GRAPH_BASE}/${igUserId}/media_publish`,
       null,
       {
         params: {
@@ -427,10 +480,10 @@ export class InstagramService {
       throw new Error('Instagram failed to finalize publication of Reel container.');
     }
 
-    // Step 4: Resolve permalink
-    let permalink = `https://instagram.com/reel/${mediaId}`;
+    // Step 4: Resolve permalink through graph.instagram.com
+    let permalink = `https://www.instagram.com/reel/${mediaId}`;
     try {
-      const mediaInfo = await axios.get(`${this.BASE_URL}/${mediaId}`, {
+      const mediaInfo = await axios.get(`${this.GRAPH_BASE}/${mediaId}`, {
         params: {
           fields: 'permalink',
           access_token: longLivedToken,
@@ -440,8 +493,8 @@ export class InstagramService {
       if (mediaInfo.data?.permalink) {
         permalink = mediaInfo.data.permalink;
       }
-    } catch (e) {
-      // fallback
+    } catch {
+      // Fallback permalink preserved
     }
 
     onProgress(100, `Published to Instagram Reels on ${creds.account.handle || creds.account.name}!`);

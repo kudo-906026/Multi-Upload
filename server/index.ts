@@ -32,6 +32,21 @@ async function startServer() {
 
   // Basic Middleware
   app.use(cors());
+
+  // Security Headers: Ensure Referrer-Policy is strict-origin-when-cross-origin (NOT no-referrer)
+  // and Content-Security-Policy explicitly allows YouTube and youtube-nocookie frames
+  app.use((req, res, next) => {
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:; " +
+      "frame-src 'self' https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com https://youtube-nocookie.com; " +
+      "img-src 'self' data: blob: https: https://*.ytimg.com https://*.youtube.com https://*.cdninstagram.com; " +
+      "media-src 'self' blob: data: https:;"
+    );
+    next();
+  });
+
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -103,11 +118,30 @@ async function startServer() {
     // Production: serve built static files from dist/client
     const clientDistPath = path.resolve(rootDir, 'dist/client');
     if (fs.existsSync(clientDistPath)) {
-      app.use(express.static(clientDistPath));
+      // sw.js MUST never be cached by browsers
+      app.get('/sw.js', (req, res) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        res.setHeader('Content-Type', 'application/javascript');
+        res.sendFile(path.join(clientDistPath, 'sw.js'));
+      });
+
+      app.use(
+        express.static(clientDistPath, {
+          setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
+              res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            } else if (filePath.includes('/assets/')) {
+              res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            }
+          },
+        })
+      );
+
       app.get('*', (req, res, next) => {
         if (req.path.startsWith('/api') || req.path.startsWith('/media')) {
           return next();
         }
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
         res.sendFile(path.join(clientDistPath, 'index.html'));
       });
     }

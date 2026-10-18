@@ -15,6 +15,7 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { ContentPlannerView } from './components/ContentPlannerView';
 import { DownloadAppModal } from './components/DownloadAppModal';
 import { BottomTabBar, TabId } from './components/BottomTabBar';
+import { UpdateNotification } from './components/UpdateNotification';
 import {
   Platform,
   VideoMetadata,
@@ -399,6 +400,9 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
+      {/* PWA / Service Worker Update Available Notification Banner */}
+      <UpdateNotification />
+
       {/* Top Header Navigation */}
       <Header
         activeTab={activeTab}

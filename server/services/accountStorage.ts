@@ -287,6 +287,13 @@ export class AccountStorageService {
   }
 
   /**
+   * Internal helper to retrieve all stored records across users (for background refresh maintenance).
+   */
+  static getAllStoredAccounts(): StoredAccountRecord[] {
+    return Array.from(this.accounts.values());
+  }
+
+  /**
    * Retrieves and decrypts the tokens for server-side authenticated operations.
    * Scoped to the specific user.
    */

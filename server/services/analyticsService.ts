@@ -225,9 +225,9 @@ export class AnalyticsService {
     const token = igAccount.tokens.longLivedToken;
     const igUserId = igAccount.account.platformAccountId;
 
-    // Fetch media list
+    // Fetch media list via graph.instagram.com
     const mediaRes = await axios.get(
-      `https://graph.facebook.com/v21.0/${igUserId}/media`,
+      `https://graph.instagram.com/v21.0/${igUserId}/media`,
       {
         params: {
           fields: 'id,caption,media_type,media_product_type,timestamp,permalink,thumbnail_url,like_count,comments_count',
@@ -249,7 +249,7 @@ export class AnalyticsService {
       // Attempt to pull insights if permissions allow
       try {
         const insightsRes = await axios.get(
-          `https://graph.facebook.com/v21.0/${m.id}/insights`,
+          `https://graph.instagram.com/v21.0/${m.id}/insights`,
           {
             params: {
               metric: 'reach,saved,shares,plays',
@@ -561,7 +561,7 @@ export class AnalyticsService {
     if (igAccount?.tokens?.longLivedToken) {
       try {
         const igRes = await axios.get(
-          `https://graph.facebook.com/v21.0/${igAccount.account.platformAccountId}/insights`,
+          `https://graph.instagram.com/v21.0/${igAccount.account.platformAccountId}/insights`,
           {
             params: {
               metric: 'online_followers',

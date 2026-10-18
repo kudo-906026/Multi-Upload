@@ -70,9 +70,9 @@ GEMINI_API_KEY=your_gemini_api_key
 GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your_client_secret
 
-# 4. Meta for Developers (Instagram Graph API)
-META_APP_ID=your_meta_app_id
-META_APP_SECRET=your_meta_app_secret
+# 4. Meta for Developers (Instagram API with Instagram Login - No Facebook Page Needed)
+META_APP_ID=your_instagram_app_id
+META_APP_SECRET=your_instagram_app_secret
 
 # 5. Token Encryption Key (AES-256-GCM)
 TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
@@ -168,8 +168,8 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
                   <Instagram className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Instagram Graph API</h3>
-                  <p className="text-[11px] text-slate-400">Reels Container Publishing Flow</p>
+                  <h3 className="text-sm font-bold text-white">Instagram API with Instagram Login</h3>
+                  <p className="text-[11px] text-slate-400">No Facebook Page needed • graph.instagram.com Reels</p>
                 </div>
               </div>
 

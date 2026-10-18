@@ -293,11 +293,15 @@ export class ApiClient {
   static async getTrends(params?: {
     niche?: string;
     region?: string;
+    timeRange?: '24h' | '7d' | '30d';
+    sort?: 'newest' | 'most_viewed';
     refresh?: boolean;
   }): Promise<NicheTrendReport> {
     const query = new URLSearchParams();
     if (params?.niche) query.set('niche', params.niche);
     if (params?.region) query.set('region', params.region);
+    if (params?.timeRange) query.set('timeRange', params.timeRange);
+    if (params?.sort) query.set('sort', params.sort);
     if (params?.refresh) query.set('refresh', 'true');
 
     const res = await safeFetch<NicheTrendReport>(`${BASE_URL}/trends?${query.toString()}`);

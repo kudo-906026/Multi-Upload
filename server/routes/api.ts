@@ -149,14 +149,17 @@ router.get('/auth/youtube/callback', async (req: Request, res: Response) => {
  */
 router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
   try {
-    const { code, state, error } = req.query;
-    if (error) {
-      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
+    const { code, state, error, error_description, error_reason } = req.query;
+    if (error || error_description || error_reason) {
+      const errMsg = String(error_description || error_reason || error);
+      console.warn('[InstagramCallback] OAuth error received from Instagram:', errMsg);
+      return res.redirect(`/?auth_error=${encodeURIComponent(errMsg)}`);
     }
     if (!code) {
       return res.redirect('/?auth_error=missing_code');
     }
 
+    const rawCode = String(code).replace(/#.*$/, '').trim();
     const stateData = OAuthStateService.verifyState(String(state || ''), 'instagram');
     if (!stateData) {
       console.warn('[InstagramCallback] Invalid or expired OAuth state');
@@ -165,11 +168,11 @@ router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
       );
     }
 
-    await InstagramService.handleCallback(String(code), stateData.userId);
+    await InstagramService.handleCallback(rawCode, stateData.userId);
     return res.redirect('/?connected=instagram');
   } catch (err: any) {
     console.error('[InstagramCallback] Error:', err);
-    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'Meta OAuth exchange failed')}`);
+    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'Instagram OAuth exchange failed')}`);
   }
 });
 
@@ -641,17 +644,19 @@ router.get('/trends', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
 
-    // Protect shared Gemini key: Check rate limit & daily quota
+    // Rate-limit per user to prevent rapid bursts
     const quotaCheck = await AIUsageService.checkAndIncrement(userId, 'trend');
     if (!quotaCheck.allowed) {
       return res.status(429).json({ success: false, error: quotaCheck.error });
     }
 
-    const niche = String(req.query.niche || 'tech');
+    const niche = String(req.query.niche || 'anime edits (amv)');
     const region = String(req.query.region || 'US');
+    const timeRange = (req.query.timeRange as '24h' | '7d' | '30d') || '7d';
+    const sort = (req.query.sort as 'newest' | 'most_viewed') || 'most_viewed';
     const forceRefresh = req.query.refresh === 'true';
 
-    const report = await TrendService.getNicheTrends(niche, region, forceRefresh, userId);
+    const report = await TrendService.getNicheTrends(niche, region, timeRange, sort, forceRefresh, userId);
     res.json({ success: true, data: report });
   } catch (err: any) {
     console.error('[TrendsRoute] Error fetching trends:', err);

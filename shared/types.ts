@@ -118,6 +118,8 @@ export interface TrendingShortVideo {
   videoUrl: string;
   tags?: string[];
   description?: string;
+  durationSec?: number;
+  isEmbeddable?: boolean;
 }
 
 export interface RankedKeyword {
@@ -173,6 +175,10 @@ export interface TrendItem {
 export interface NicheTrendReport {
   niche: string;
   region: string;
+  timeRange?: '24h' | '7d' | '30d';
+  sort?: 'newest' | 'most_viewed';
+  quotaExceeded?: boolean;
+  quotaMessage?: string;
   lastUpdated: string;
   cachedUntil: string;
   videos: TrendingShortVideo[];

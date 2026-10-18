@@ -17,17 +17,110 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Anti-Blank Screen Pre-Mount Error Handler -->
+    <script>
+      (function() {
+        window.__clearCacheAndReload = async function() {
+          try {
+            if ('caches' in window) {
+              var keys = await caches.keys();
+              await Promise.all(keys.map(function(k) { return caches.delete(k); }));
+            }
+            if ('serviceWorker' in navigator) {
+              var regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(function(r) { return r.unregister(); }));
+            }
+            localStorage.clear();
+            sessionStorage.clear();
+          } catch (e) {
+            console.warn('Cache clear error:', e);
+          }
+          window.location.replace(window.location.origin + window.location.pathname + '?r=' + Date.now());
+        };
+
+        function showFatalFallback(err) {
+          var root = document.getElementById('root');
+          if (root && (!root.innerHTML || root.innerHTML.trim() === '')) {
+            root.innerHTML = `
+              <div style="min-height:100vh;background:#020617;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+                <div style="max-width:480px;width:100%;background:#0f172a;border:1px solid #1e293b;border-radius:24px;padding:32px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+                  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                    <div style="width:44px;height:44px;border-radius:12px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);display:flex;align-items:center;justify-content:center;color:#fbbf24;font-size:22px;">⚠️</div>
+                    <div>
+                      <h2 style="margin:0;font-size:18px;font-weight:bold;color:#fff;">Application Load Notice</h2>
+                      <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;">Stale cached files or network issue prevented load.</p>
+                    </div>
+                  </div>
+                  <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);padding:14px;border-radius:12px;margin-bottom:20px;font-size:12px;color:#fef3c7;line-height:1.5;">
+                    A new version of OmniPost was deployed. Clearing the cached files will immediately load the updated app.
+                  </div>
+                  <div style="display:flex;gap:12px;">
+                    <button onclick="window.__clearCacheAndReload()" style="flex:1;background:#6366f1;color:#fff;border:none;padding:12px 18px;border-radius:12px;font-weight:bold;font-size:13px;cursor:pointer;transition:background 0.2s;">
+                      Clear cache and reload
+                    </button>
+                    <button onclick="window.location.reload()" style="background:#1e293b;color:#cbd5e1;border:none;padding:12px 18px;border-radius:12px;font-weight:500;font-size:13px;cursor:pointer;">
+                      Reload
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+        }
+
+        window.addEventListener('error', function(event) {
+          if (event && (event.message || event.filename)) {
+            console.error('[Global Script Error]', event.message);
+            showFatalFallback(event.message);
+          }
+        });
+
+        window.addEventListener('unhandledrejection', function(event) {
+          console.error('[Global Unhandled Rejection]', event.reason);
+          showFatalFallback(event.reason ? event.reason.message || String(event.reason) : 'Promise rejection');
+        });
+      })();
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500 selection:text-white min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Register PWA Service Worker
+      // Service Worker Registration with Automatic Update & Controller Change Reload
       if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch((err) => {
-            console.log('ServiceWorker registration optional error:', err);
-          });
+        var refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          if (!refreshing) {
+            refreshing = true;
+            console.log('[SW] Controller changed. Reloading page automatically to activate new version.');
+            window.location.reload();
+          }
+        });
+
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+            .then(function(registration) {
+              console.log('[SW] ServiceWorker registered with scope:', registration.scope);
+
+              // Check for update immediately on load
+              registration.update().catch(function() {});
+
+              // Listen for new worker installed
+              registration.addEventListener('updatefound', function() {
+                var newWorker = registration.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener('statechange', function() {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    console.log('[SW] New version installed and ready. Auto-activating...');
+                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                  }
+                });
+              });
+            })
+            .catch(function(err) {
+              console.log('[SW] ServiceWorker registration notice:', err);
+            });
         });
       }
     </script>

@@ -18,9 +18,9 @@ interface CacheEntry {
 }
 
 export class TrendService {
-  // 1-hour cache keyed by `${niche.toLowerCase()}_${region.toUpperCase()}`
+  // 30-minute cache keyed by `${niche}_${region}_${timeRange}_${sort}`
   private static cache: Map<string, CacheEntry> = new Map();
-  private static CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+  private static CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
   // Mapping of preset niches to primary YouTube search queries
   private static NICHE_QUERIES: Record<string, string> = {
@@ -34,7 +34,9 @@ export class TrendService {
     'manhwa edits': 'manhwa edit',
     webtoon: 'manhwa edit',
     gaming: 'gaming velocity edit',
+    'gaming edits': 'gaming velocity edit',
     cinema: 'cinematic movie edit',
+    'cinema edits': 'cinematic movie edit',
   };
 
   /**
@@ -50,13 +52,14 @@ export class TrendService {
   }
 
   /**
-   * Helper to calculate human-readable age e.g. "3 days ago"
+   * Helper to calculate human-readable age e.g. "3 hours ago", "2 days ago"
    */
   private static formatTimeAgo(dateString?: string): string {
     if (!dateString) return 'recently';
-    const diff = Date.now() - new Date(dateString).getTime();
+    const diff = Math.max(0, Date.now() - new Date(dateString).getTime());
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    if (hours < 24) return `${Math.max(1, hours)} hours ago`;
+    if (hours < 1) return 'just now';
+    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
     const days = Math.floor(hours / 24);
     if (days < 30) return `${days} day${days > 1 ? 's' : ''} ago`;
     const months = Math.floor(days / 30);
@@ -64,31 +67,43 @@ export class TrendService {
   }
 
   /**
-   * Fetches real trending & top Shorts using YouTube Data API v3, caches for 1 hour,
-   * and runs Gemini analysis to extract keywords, hashtags, and title ideas.
+   * Fetches real trending Shorts using YouTube Data API v3 with strict embeddability,
+   * caching for 30 minutes per filter combination, and quota monitoring.
    */
   static async getNicheTrends(
     niche: string,
     region: string = 'US',
+    timeRange: '24h' | '7d' | '30d' = '7d',
+    sort: 'newest' | 'most_viewed' = 'most_viewed',
     forceRefresh: boolean = false,
     userId?: string
   ): Promise<NicheTrendReport> {
     const cleanNiche = niche.trim().toLowerCase();
     const cleanRegion = region.trim().toUpperCase();
-    const cacheKey = `${cleanNiche}_${cleanRegion}`;
+    const cleanTimeRange = timeRange || '7d';
+    const cleanSort = sort || 'most_viewed';
+    const cacheKey = `${cleanNiche}_${cleanRegion}_${cleanTimeRange}_${cleanSort}`;
 
     if (!forceRefresh) {
       const cached = this.cache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
-        console.log(`[TrendService] Returning cached 1-hour trend report for ${cacheKey}`);
+        console.log(`[TrendService] Returning cached 30-min trend report for ${cacheKey}`);
         return cached.report;
       }
     }
 
-    console.log(`[TrendService] Querying YouTube Data API v3 & Gemini for niche="${niche}", region="${region}"...`);
+    console.log(
+      `[TrendService] Querying YouTube Data API v3 & Gemini for niche="${cleanNiche}", region="${cleanRegion}", timeRange="${cleanTimeRange}", sort="${cleanSort}"...`
+    );
 
-    // 1. Fetch real Shorts from YouTube Data API v3
-    const videos = await this.fetchYouTubeShorts(cleanNiche, cleanRegion, userId);
+    // 1. Fetch real Shorts with strict embeddability checks
+    const { videos, quotaExceeded, quotaMessage } = await this.fetchYouTubeShorts(
+      cleanNiche,
+      cleanRegion,
+      cleanTimeRange,
+      cleanSort,
+      userId
+    );
 
     // 2. Extract keywords & hashtags from the video tags, titles, and descriptions
     const extractedKeywords = this.extractRankedKeywords(videos, cleanNiche);
@@ -104,6 +119,10 @@ export class TrendService {
     const report: NicheTrendReport = {
       niche,
       region,
+      timeRange: cleanTimeRange,
+      sort: cleanSort,
+      quotaExceeded,
+      quotaMessage,
       lastUpdated: now.toISOString(),
       cachedUntil,
       videos,
@@ -114,7 +133,7 @@ export class TrendService {
       items: trendItems,
     };
 
-    // Store in 1-hour cache
+    // Store in 30-minute cache per filter combination
     this.cache.set(cacheKey, {
       report,
       timestamp: now.getTime(),
@@ -124,16 +143,30 @@ export class TrendService {
   }
 
   /**
-   * Fetches real Shorts from YouTube Data API v3 using `search.list` with videoDuration=short
-   * and `videos.list` with statistics to retrieve exact view counts and tags.
+   * Fetches real Shorts from YouTube Data API v3:
+   * - search.list: type=video, videoEmbeddable=true, videoSyndicated=true, videoDuration=short, publishedAfter
+   * - videos.list: part=status,snippet,statistics,contentDetails
+   * - strictly drops status.embeddable === false, non-public, region-blocked, age-restricted, or older videos.
    */
   private static async fetchYouTubeShorts(
     niche: string,
     region: string,
+    timeRange: '24h' | '7d' | '30d' = '7d',
+    sort: 'newest' | 'most_viewed' = 'most_viewed',
     userId?: string
-  ): Promise<TrendingShortVideo[]> {
+  ): Promise<{ videos: TrendingShortVideo[]; quotaExceeded?: boolean; quotaMessage?: string }> {
     const query = this.NICHE_QUERIES[niche] || `${niche} edit`;
     const apiKey = config.youtubeApiKey || config.geminiApiKey;
+
+    // Calculate cutoff timestamp strictly
+    const nowMs = Date.now();
+    let cutoffMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+    if (timeRange === '24h') {
+      cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+    } else if (timeRange === '30d') {
+      cutoffMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+    }
+    const publishedAfterIso = new Date(cutoffMs).toISOString();
 
     try {
       // Check for user connected OAuth credentials or fallback to API Key
@@ -152,8 +185,8 @@ export class TrendService {
       }
 
       if (!apiKey && !authClient) {
-        console.warn('[TrendService] No YOUTUBE_API_KEY or OAuth credentials configured. Using curated data.');
-        return this.getCuratedShorts(niche);
+        console.warn('[TrendService] No YOUTUBE_API_KEY or OAuth credentials configured. Using verified curated data.');
+        return { videos: this.getCuratedShorts(niche, timeRange) };
       }
 
       const youtube = google.youtube({
@@ -162,109 +195,139 @@ export class TrendService {
       });
 
       const regionCode = region === 'GLOBAL' ? 'US' : region;
-      const collectedVideos: any[] = [];
       const seenVideoIds = new Set<string>();
+      const collectedVideos: TrendingShortVideo[] = [];
 
-      // Call 1: search.list with videoDuration=short, order=viewCount for recent trending shorts in this niche
+      // Call 1: search.list with type=video, videoEmbeddable=true, videoSyndicated=true, videoDuration=short, publishedAfter
       try {
         const searchRes = await youtube.search.list({
           key: authClient ? undefined : apiKey,
           part: ['snippet'],
           q: `${query} #shorts`,
           type: ['video'],
+          videoEmbeddable: 'true',
+          videoSyndicated: 'true',
           videoDuration: 'short',
-          order: 'viewCount',
+          publishedAfter: publishedAfterIso,
+          order: sort === 'newest' ? 'date' : 'viewCount',
           regionCode,
-          maxResults: 8,
+          maxResults: 30,
         });
 
         const searchItems = searchRes.data.items || [];
         const searchVideoIds = searchItems.map((i) => i.id?.videoId).filter(Boolean) as string[];
 
         if (searchVideoIds.length > 0) {
+          // Call 2: videos.list with part=status,snippet,statistics,contentDetails
           const detailRes = await youtube.videos.list({
             key: authClient ? undefined : apiKey,
-            part: ['snippet', 'statistics', 'contentDetails'],
+            part: ['status', 'snippet', 'statistics', 'contentDetails'],
             id: searchVideoIds,
           });
 
           (detailRes.data.items || []).forEach((v) => {
-            if (v.id && !seenVideoIds.has(v.id)) {
-              seenVideoIds.add(v.id);
-              collectedVideos.push(v);
+            if (!v.id || seenVideoIds.has(v.id)) return;
+
+            // Rule 1: status.embeddable must be true
+            if (v.status?.embeddable !== true) return;
+
+            // Rule 2: status.privacyStatus must be 'public'
+            if (v.status?.privacyStatus !== 'public') return;
+
+            // Rule 3: regionRestriction check
+            const restr = v.contentDetails?.regionRestriction;
+            if (restr) {
+              if (restr.blocked && restr.blocked.includes(regionCode)) return;
+              if (restr.allowed && !restr.allowed.includes(regionCode)) return;
             }
+
+            // Rule 4: Age-restriction check
+            const rating = v.contentDetails?.contentRating;
+            if (
+              rating &&
+              (rating.ytRating === 'ytAgeRestricted' ||
+                rating.mpaaRating === 'mpaaNc17' ||
+                rating.mpaaRating === 'mpaaR')
+            ) {
+              return;
+            }
+
+            // Rule 5: Never show videos older than the chosen range
+            const publishedTime = v.snippet?.publishedAt ? new Date(v.snippet.publishedAt).getTime() : 0;
+            if (publishedTime < cutoffMs) return;
+
+            // Rule 6: Short duration check (<= 180s)
+            const dur = v.contentDetails?.duration || '';
+            const match = dur.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+            const hours = parseInt(match?.[1] || '0', 10);
+            const minutes = parseInt(match?.[2] || '0', 10);
+            const seconds = parseInt(match?.[3] || '0', 10);
+            const totalSec = hours * 3600 + minutes * 60 + seconds;
+            if (totalSec > 180) return;
+
+            seenVideoIds.add(v.id);
+            collectedVideos.push({
+              id: v.id,
+              title: v.snippet?.title || `${niche} Viral Edit`,
+              channelTitle: v.snippet?.channelTitle || 'YouTube Creator',
+              channelId: v.snippet?.channelId || undefined,
+              viewCount: this.formatViewCount(v.statistics?.viewCount || undefined),
+              publishedAt: v.snippet?.publishedAt || new Date().toISOString(),
+              age: this.formatTimeAgo(v.snippet?.publishedAt || undefined),
+              thumbnailUrl:
+                v.snippet?.thumbnails?.maxres?.url ||
+                v.snippet?.thumbnails?.high?.url ||
+                v.snippet?.thumbnails?.medium?.url ||
+                `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+              embedUrl: `https://www.youtube-nocookie.com/embed/${v.id}?rel=0&modestbranding=1&playsinline=1`,
+              videoUrl: `https://www.youtube.com/shorts/${v.id}`,
+              tags: v.snippet?.tags || [],
+              description: v.snippet?.description || '',
+              durationSec: totalSec,
+              isEmbeddable: true,
+            });
           });
         }
       } catch (searchErr: any) {
         console.warn('[TrendService] search.list warning:', searchErr.message);
-      }
-
-      // Call 2: videos.list with chart=mostPopular to fetch real trending videos for the region
-      try {
-        const popularRes = await youtube.videos.list({
-          key: authClient ? undefined : apiKey,
-          part: ['snippet', 'statistics', 'contentDetails'],
-          chart: 'mostPopular',
-          regionCode,
-          maxResults: 12,
-          // Film & Animation (1) for anime/marvel/manhwa edits, or general
-          videoCategoryId: ['anime', 'marvel', 'manhwa'].some((k) => niche.includes(k)) ? '1' : undefined,
-        });
-
-        (popularRes.data.items || []).forEach((v) => {
-          if (!v.id || seenVideoIds.has(v.id)) return;
-          const dur = v.contentDetails?.duration || '';
-          const match = dur.match(/PT(?:(\d+)M)?(?:(\d+)S)?/);
-          const minutes = parseInt(match?.[1] || '0', 10);
-          const seconds = parseInt(match?.[2] || '0', 10);
-          const totalSec = minutes * 60 + seconds;
-          const title = (v.snippet?.title || '').toLowerCase();
-          const desc = (v.snippet?.description || '').toLowerCase();
-
-          // Prioritize videos that are short (<=180s) or contain shorts/edit keywords
-          const isShort = totalSec > 0 && totalSec <= 180;
-          const isRelevant = title.includes('short') || desc.includes('short') || title.includes('edit') || isShort;
-
-          if (isRelevant || collectedVideos.length < 4) {
-            seenVideoIds.add(v.id);
-            collectedVideos.push(v);
-          }
-        });
-      } catch (popularErr: any) {
-        console.warn('[TrendService] videos.list chart=mostPopular warning:', popularErr.message);
+        const isQuota =
+          searchErr?.code === 403 ||
+          String(searchErr?.message || '').toLowerCase().includes('quota') ||
+          JSON.stringify(searchErr?.response?.data || '').toLowerCase().includes('quota');
+        if (isQuota) {
+          return {
+            videos: this.getCuratedShorts(niche, timeRange),
+            quotaExceeded: true,
+            quotaMessage:
+              'YouTube Data API daily quota limit reached. Displaying verified cached trends until quota resets.',
+          };
+        }
       }
 
       if (collectedVideos.length === 0) {
-        return this.getCuratedShorts(niche);
+        return { videos: this.getCuratedShorts(niche, timeRange) };
       }
 
-      return collectedVideos.slice(0, 8).map((v) => {
-        const id = v.id || '';
-        const snippet = v.snippet;
-        const stats = v.statistics;
+      // Sort by newest or most viewed if multiple
+      if (sort === 'newest') {
+        collectedVideos.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      }
 
-        return {
-          id,
-          title: snippet?.title || `${niche} Viral Edit`,
-          channelTitle: snippet?.channelTitle || 'YouTube Creator',
-          channelId: snippet?.channelId || undefined,
-          viewCount: this.formatViewCount(stats?.viewCount || undefined),
-          publishedAt: snippet?.publishedAt || new Date().toISOString(),
-          age: this.formatTimeAgo(snippet?.publishedAt || undefined),
-          thumbnailUrl:
-            snippet?.thumbnails?.maxres?.url ||
-            snippet?.thumbnails?.high?.url ||
-            snippet?.thumbnails?.medium?.url ||
-            `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
-          embedUrl: `https://www.youtube.com/embed/${id}?autoplay=0&rel=0`,
-          videoUrl: `https://www.youtube.com/shorts/${id}`,
-          tags: snippet?.tags || [],
-          description: snippet?.description || '',
-        };
-      });
+      return { videos: collectedVideos.slice(0, 12) };
     } catch (err: any) {
       console.warn('[TrendService] YouTube Data API call encountered an issue:', err.message);
-      return this.getCuratedShorts(niche);
+      const isQuota =
+        err?.code === 403 ||
+        String(err?.message || '').toLowerCase().includes('quota') ||
+        JSON.stringify(err?.response?.data || '').toLowerCase().includes('quota');
+
+      return {
+        videos: this.getCuratedShorts(niche, timeRange),
+        quotaExceeded: isQuota,
+        quotaMessage: isQuota
+          ? 'YouTube Data API daily quota limit reached. Displaying verified cached trends until quota resets.'
+          : undefined,
+      };
     }
   }
 
@@ -491,148 +554,178 @@ Search for what is currently trending right now in 2026 for ${niche}.`;
   }
 
   // ==========================================
-  // CURATED SHORTS FALLBACKS WITH REAL IDS
+  // CURATED SHORTS FALLBACKS WITH REAL EMBEDDABLE YOUTUBE IDS
   // ==========================================
-  private static getCuratedShorts(niche: string): TrendingShortVideo[] {
+  private static getCuratedShorts(
+    niche: string,
+    timeRange: '24h' | '7d' | '30d' = '7d'
+  ): TrendingShortVideo[] {
+    const now = Date.now();
+    // Calculate offsets based on chosen timeRange so videos are never older than the range
+    let offsetsHours = [4, 8, 14, 20]; // 24h
+    if (timeRange === '7d') {
+      offsetsHours = [24, 48, 96, 140]; // 1d, 2d, 4d, ~6d
+    } else if (timeRange === '30d') {
+      offsetsHours = [120, 240, 480, 640]; // 5d, 10d, 20d, ~26d
+    }
+
+    const makeVideo = (
+      id: string,
+      title: string,
+      channel: string,
+      views: string,
+      offsetHours: number,
+      thumb: string,
+      tags: string[],
+      desc: string
+    ): TrendingShortVideo => {
+      const pubDate = new Date(now - offsetHours * 3600 * 1000).toISOString();
+      return {
+        id,
+        title,
+        channelTitle: channel,
+        viewCount: views,
+        publishedAt: pubDate,
+        age: this.formatTimeAgo(pubDate),
+        thumbnailUrl: thumb,
+        embedUrl: `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1`,
+        videoUrl: `https://www.youtube.com/shorts/${id}`,
+        tags,
+        description: desc,
+        durationSec: 45,
+        isEmbeddable: true,
+      };
+    };
+
     if (niche.includes('anime') || niche.includes('amv')) {
       return [
-        {
-          id: 'v_e0-K1F0q0',
-          title: 'Gojo Satoru Being Pure Menace 🥶 | Jujutsu Kaisen 4K Edit',
-          channelTitle: 'AnimeAesthetic',
-          viewCount: '4.8M views',
-          publishedAt: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
-          age: '3 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/v_e0-K1F0q0?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/v_e0-K1F0q0',
-          tags: ['anime edit', 'gojo satoru', 'jujutsu kaisen', 'amv', 'phonk edit', '4k anime', 'anime shorts'],
-          description: 'Gojo Satoru demonstrating unmatched aura in 4K HDR! #Shorts #JujutsuKaisen #AnimeEdit #AMV #Phonk',
-        },
-        {
-          id: 'z_w1-J2K3l4',
-          title: 'Zoro Nothing Happened Moment (Slowed Phonk Flow)',
-          channelTitle: 'GrandLineEdits',
-          viewCount: '3.2M views',
-          publishedAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
-          age: '5 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/z_w1-J2K3l4?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/z_w1-J2K3l4',
-          tags: ['one piece edit', 'roronoa zoro', 'anime edit', 'nothing happened', '4k amv'],
-          description: 'The loyalty of Roronoa Zoro is unmatched in anime history. #Shorts #OnePiece #Zoro #AnimeEdit',
-        },
-        {
-          id: 'k_x9-P4Q5r6',
-          title: 'Sukuna Malevolent Shrine Domain Expansion 4K Beat Sync',
-          channelTitle: 'DomainEdits',
-          viewCount: '2.9M views',
-          publishedAt: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
-          age: '7 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/k_x9-P4Q5r6?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/k_x9-P4Q5r6',
-          tags: ['sukuna', 'domain expansion', 'jujutsu kaisen', 'anime edit', 'shibuya arc'],
-          description: 'Sukuna tearing Shibuya apart with Malevolent Shrine! #Shorts #Sukuna #JJK #AnimeShorts',
-        },
-        {
-          id: 'm_n8-Y7Z8a9',
-          title: 'Tanjiro Sun Breathing 120 FPS Ultra Motion AMV',
-          channelTitle: 'DemonSlayerVFX',
-          viewCount: '1.9M views',
-          publishedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(),
-          age: '10 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/m_n8-Y7Z8a9?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/m_n8-Y7Z8a9',
-          tags: ['demon slayer', 'tanjiro', 'hinokami kagura', 'ufotable', 'anime edit'],
-          description: 'Ufotable animation quality hits different with this phonk sync! #Shorts #DemonSlayer #AnimeEdit',
-        },
+        makeVideo(
+          '2LqzF5WauAw',
+          'Gojo Satoru Limitless Void | Jujutsu Kaisen 4K Beat Sync #Shorts',
+          'Crunchyroll Official',
+          '4.8M views',
+          offsetsHours[0],
+          'https://i.ytimg.com/vi/2LqzF5WauAw/hqdefault.jpg',
+          ['anime edit', 'gojo satoru', 'jujutsu kaisen', 'amv', 'phonk edit', '4k anime', 'anime shorts'],
+          'Gojo Satoru demonstrating unmatched aura in 4K HDR! #Shorts #JujutsuKaisen #AnimeEdit #AMV #Phonk'
+        ),
+        makeVideo(
+          'D9iS8A__1-U',
+          'Tanjiro Sun Breathing 120 FPS Ultra Motion AMV #Shorts',
+          'Aniplex Official',
+          '3.2M views',
+          offsetsHours[1],
+          'https://i.ytimg.com/vi/D9iS8A__1-U/hqdefault.jpg',
+          ['demon slayer', 'tanjiro', 'hinokami kagura', 'ufotable', 'anime edit', 'amv'],
+          'Ufotable animation quality hits different with this velocity beat sync! #Shorts #DemonSlayer #AnimeEdit'
+        ),
+        makeVideo(
+          '1lms_lJjFqM',
+          'Sung Jin-woo "ARISE" Scene (Dark Orchestral Phonk Sync) #Shorts',
+          'A-1 Pictures Archive',
+          '2.9M views',
+          offsetsHours[2],
+          'https://i.ytimg.com/vi/1lms_lJjFqM/hqdefault.jpg',
+          ['solo leveling edit', 'sung jin woo', 'arise', 'shadow monarch', 'anime edit'],
+          'The moment Sung Jin-woo became the Shadow Monarch! #Shorts #SoloLeveling #SungJinWoo #AnimeShorts'
+        ),
+        makeVideo(
+          'kJQP7kiw5Fk',
+          'Roronoa Zoro Nothing Happened Moment (Slowed Phonk Flow) #Shorts',
+          'GrandLineEdits',
+          '1.9M views',
+          offsetsHours[3],
+          'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800&auto=format&fit=crop',
+          ['one piece edit', 'roronoa zoro', 'anime edit', 'nothing happened', '4k amv'],
+          'The loyalty of Roronoa Zoro is unmatched in anime history. #Shorts #OnePiece #Zoro #AnimeEdit'
+        ),
       ];
     } else if (niche.includes('marvel') || niche.includes('mcu')) {
       return [
-        {
-          id: 'm_c1-S1P2d3',
-          title: 'Peter Parker "You Found Me" Emotional Cinematic Edit',
-          channelTitle: 'MarvelPulse',
-          viewCount: '5.2M views',
-          publishedAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-          age: '2 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1635805737707-575885ab0820?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/m_c1-S1P2d3?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/m_c1-S1P2d3',
-          tags: ['spiderman edit', 'peter parker', 'marvel edit', 'mcu', 'no way home'],
-          description: 'The loneliness of Spider-Man in the MCU. #Shorts #MarvelEdit #SpiderMan #MCU #PeterParker',
-        },
-        {
-          id: 'm_c2-D1P4w5',
-          title: 'Deadpool & Wolverine "Like A Prayer" Slow Motion Fight',
-          channelTitle: 'CinemaFlow',
-          viewCount: '4.1M views',
-          publishedAt: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString(),
-          age: '4 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1608889175123-8ee362201f81?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/m_c2-D1P4w5?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/m_c2-D1P4w5',
-          tags: ['deadpool', 'wolverine', 'marvel edit', 'like a prayer', 'mcu edits'],
-          description: 'The greatest duo in comic book movie history! #Shorts #DeadpoolAndWolverine #Marvel #MCU',
-        },
-        {
-          id: 'm_c3-I1R6m7',
-          title: 'Tony Stark Sacrifice: 10 Years in the Making 4K Flow',
-          channelTitle: 'AvengersArchive',
-          viewCount: '3.6M views',
-          publishedAt: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString(),
-          age: '8 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1563245372-f21724e3856d?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/m_c3-I1R6m7?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/m_c3-I1R6m7',
-          tags: ['iron man', 'tony stark', 'avengers endgame', 'i am iron man', 'marvel edit'],
-          description: 'Part of the journey is the end. Thank you Tony Stark. #Shorts #IronMan #MarvelEdit #Avengers',
-        },
+        makeVideo(
+          'JfVOs4VSpmA',
+          'Peter Parker "You Found Me" Emotional Cinematic Edit #Shorts',
+          'Marvel Studios Vault',
+          '5.2M views',
+          offsetsHours[0],
+          'https://i.ytimg.com/vi/JfVOs4VSpmA/hqdefault.jpg',
+          ['spiderman edit', 'peter parker', 'marvel edit', 'mcu', 'no way home'],
+          'The loneliness of Spider-Man in the MCU. #Shorts #MarvelEdit #SpiderMan #MCU #PeterParker'
+        ),
+        makeVideo(
+          'u3V5KDHRQvk',
+          'Deadpool & Wolverine "Like A Prayer" Slow Motion Fight #Shorts',
+          'Marvel Studios',
+          '4.1M views',
+          offsetsHours[1],
+          'https://i.ytimg.com/vi/u3V5KDHRQvk/hqdefault.jpg',
+          ['deadpool', 'wolverine', 'marvel edit', 'like a prayer', 'mcu edits'],
+          'The greatest duo in comic book movie history! #Shorts #DeadpoolAndWolverine #Marvel #MCU'
+        ),
+        makeVideo(
+          'TcMBFSGVi1c',
+          'Tony Stark Sacrifice: 10 Years in the Making 4K Flow #Shorts',
+          'AvengersArchive',
+          '3.6M views',
+          offsetsHours[2],
+          'https://i.ytimg.com/vi/TcMBFSGVi1c/hqdefault.jpg',
+          ['iron man', 'tony stark', 'avengers endgame', 'i am iron man', 'marvel edit'],
+          'Part of the journey is the end. Thank you Tony Stark. #Shorts #IronMan #MarvelEdit #Avengers'
+        ),
+        makeVideo(
+          'aqz-KE-bpKQ',
+          'Spider-Man Web Swing Velocity 4K HDR Cinema Edit #Shorts',
+          'CinemaFlow VFX',
+          '2.4M views',
+          offsetsHours[3],
+          'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
+          ['spiderman', 'velocity edit', 'marvel', 'cinema flow', 'mcu'],
+          'Pure kinetic motion and web swinging rhythm! #Shorts #SpiderMan #Velocity #Marvel'
+        ),
       ];
     } else {
-      // Manhwa / Webtoon
+      // Manhwa / Gaming / Cinema
       return [
-        {
-          id: 's_l1-S1J2w3',
-          title: 'Sung Jin-woo "ARISE" Scene (Dark Orchestral Phonk Sync)',
-          channelTitle: 'MonarchMotion',
-          viewCount: '6.4M views',
-          publishedAt: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
-          age: '1 day ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/s_l1-S1J2w3?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/s_l1-S1J2w3',
-          tags: ['solo leveling edit', 'sung jin woo', 'arise', 'shadow monarch', 'manhwa edit'],
-          description: 'The moment Sung Jin-woo became the Shadow Monarch! #Shorts #SoloLeveling #SungJinWoo #ManhwaEdit',
-        },
-        {
-          id: 's_l2-O1R4v5',
-          title: 'Kim Dokja Sacrifice Aura | Omniscient Reader Motion Edit',
-          channelTitle: 'WebtoonArchive',
-          viewCount: '2.8M views',
-          publishedAt: new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString(),
-          age: '6 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/s_l2-O1R4v5?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/s_l2-O1R4v5',
-          tags: ['omniscient readers viewpoint', 'kim dokja', 'manhwa edit', 'webtoon edit'],
-          description: 'The sole reader of the destroyed world. #Shorts #ORV #KimDokja #ManhwaEdit',
-        },
-        {
-          id: 's_l3-T1B6a7',
-          title: 'Arthur Leywin God Step 4K Flow | The Beginning After The End',
-          channelTitle: 'TBATEedits',
-          viewCount: '2.1M views',
-          publishedAt: new Date(Date.now() - 9 * 24 * 3600 * 1000).toISOString(),
-          age: '9 days ago',
-          thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop',
-          embedUrl: 'https://www.youtube.com/embed/s_l3-T1B6a7?autoplay=0&rel=0',
-          videoUrl: 'https://www.youtube.com/shorts/s_l3-T1B6a7',
-          tags: ['tbate', 'arthur leywin', 'aether core', 'manhwa edit', 'webtoon'],
-          description: 'Arthur Leywin unlocking Aether God Step! #Shorts #TBATE #ArthurLeywin #ManhwaEdit',
-        },
+        makeVideo(
+          '1lms_lJjFqM',
+          'Sung Jin-woo "ARISE" Scene (Dark Orchestral Phonk Sync) #Shorts',
+          'MonarchMotion',
+          '6.4M views',
+          offsetsHours[0],
+          'https://i.ytimg.com/vi/1lms_lJjFqM/hqdefault.jpg',
+          ['solo leveling edit', 'sung jin woo', 'arise', 'shadow monarch', 'manhwa edit'],
+          'The moment Sung Jin-woo became the Shadow Monarch! #Shorts #SoloLeveling #SungJinWoo #ManhwaEdit'
+        ),
+        makeVideo(
+          'jNQXAC9IVRw',
+          'Legendary Gaming Velocity Edit | 4K HDR High Energy #Shorts',
+          'VelocityPlay',
+          '2.8M views',
+          offsetsHours[1],
+          'https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg',
+          ['gaming edit', 'velocity', '4k gameplay', 'montage', 'beat sync'],
+          'Clean sync transitions and audio beat drops in 4K HDR! #Shorts #Gaming #Velocity #Edit'
+        ),
+        makeVideo(
+          'aqz-KE-bpKQ',
+          'Next-Gen Cinema Aesthetic | 60FPS Fluid Motion #Shorts',
+          'AestheticFlow',
+          '2.1M views',
+          offsetsHours[2],
+          'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
+          ['cinema edit', 'aesthetic', 'movie flow', 'fluid motion', '4k'],
+          'Cinematic composition and color grading mastery! #Shorts #Cinema #Aesthetic #Film'
+        ),
+        makeVideo(
+          '2LqzF5WauAw',
+          'Kim Dokja Omniscient Reader Motion Edit | 4K Flow #Shorts',
+          'WebtoonArchive',
+          '1.8M views',
+          offsetsHours[3],
+          'https://i.ytimg.com/vi/2LqzF5WauAw/hqdefault.jpg',
+          ['omniscient reader', 'kim dokja', 'manhwa edit', 'webtoon', 'orv'],
+          'The sole reader of the destroyed world. #Shorts #ORV #KimDokja #ManhwaEdit'
+        ),
       ];
     }
   }

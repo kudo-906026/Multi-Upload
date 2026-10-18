@@ -42,7 +42,7 @@ export class ContentPlannerService {
     const worstVideos = sortedVideos.length > 3 ? sortedVideos.slice(-3) : [];
 
     // 2. Gather Trends data for their niche
-    const trendsReport = await TrendService.getNicheTrends(cleanNiche, 'US', false, userId);
+    const trendsReport = await TrendService.getNicheTrends(cleanNiche, 'US', '7d', 'most_viewed', false, userId);
 
     // 3. Build synthesis with Gemini (or curated generator)
     let plan: ContentPlannerReport;

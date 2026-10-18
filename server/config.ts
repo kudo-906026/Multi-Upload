@@ -36,11 +36,14 @@ export const config = {
     redirectUri: `${publicBaseUrl}/api/auth/youtube/callback`,
   },
 
-  // Meta / Instagram Developer App Credentials
+  // Meta / Instagram Developer App Credentials (Instagram API with Instagram Login)
   meta: {
     appId: process.env.META_APP_ID || process.env.INSTAGRAM_CLIENT_ID || process.env.META_CLIENT_ID || '',
     appSecret: process.env.META_APP_SECRET || process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_CLIENT_SECRET || '',
-    redirectUri: `${publicBaseUrl}/api/auth/instagram/callback`,
+    redirectUri:
+      process.env.INSTAGRAM_REDIRECT_URI ||
+      process.env.META_REDIRECT_URI ||
+      'https://omnipost-k6b5.onrender.com/api/auth/instagram/callback',
   },
 
   // Supabase Storage & Database Configuration (Free Tier, replaces GCS & Firestore)

@@ -567,7 +567,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ authStatus, onRefres
               </button>
             </div>
             <p className="text-[11px] text-slate-500">
-              Add under: <em>Meta App &gt; Instagram / Facebook Login &gt; Settings &gt; Valid OAuth Redirect URIs</em>
+              Add under: <em>Meta App &gt; Instagram API with Instagram Login &gt; Settings &gt; Valid OAuth Redirect URIs</em> (No Facebook Page or App Domains required)
             </p>
           </div>
         </div>
