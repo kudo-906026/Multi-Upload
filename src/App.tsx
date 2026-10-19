@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Video, Flame, History, Users, Settings, Sparkles, Loader2, AlertTriangle, RefreshCw, Key } from 'lucide-react';
+import { Video, Flame, History, Users, Settings, Sparkles, Loader2, AlertTriangle, RefreshCw, Key, CheckCircle2, X } from 'lucide-react';
 import { Header } from './components/Header';
 import { AuthScreen } from './components/AuthScreen';
 import { VideoUploader } from './components/VideoUploader';
@@ -61,6 +61,14 @@ export const App: React.FC = () => {
   const [jobs, setJobs] = useState<PublishJob[]>([]);
   const [authStatus, setAuthStatus] = useState<PlatformAuthStatus | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+
+  // OAuth Feedback Notice (surfaces real Google or Meta error messages / missing permission notices)
+  const [oauthNotice, setOauthNotice] = useState<{
+    type: 'success' | 'warning' | 'error';
+    message: string;
+    missingPermissions?: string[];
+    platform?: 'youtube' | 'instagram';
+  } | null>(null);
 
   // Download & PWA Modal state
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
@@ -211,6 +219,49 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (currentUser) {
       loadInitialData();
+    }
+  }, [currentUser]);
+
+  // Handle OAuth callback parameters (error messages, connected notices, and missing permissions)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const authError = searchParams.get('auth_error');
+      const connected = searchParams.get('connected');
+      const missing = searchParams.get('missing');
+      const platformParam = (searchParams.get('platform') as 'youtube' | 'instagram') || undefined;
+
+      if (authError) {
+        setOauthNotice({
+          type: 'error',
+          message: decodeURIComponent(authError),
+          platform: platformParam,
+        });
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (connected) {
+        const platformName = connected === 'youtube' ? 'YouTube' : 'Instagram';
+        if (missing) {
+          const missingList = decodeURIComponent(missing).split(',').filter(Boolean);
+          setOauthNotice({
+            type: 'warning',
+            message: `${platformName} connected successfully, but missing required permissions: ${missingList.join(', ')}. Full analytics requires all requested permissions.`,
+            missingPermissions: missingList,
+            platform: connected as 'youtube' | 'instagram',
+          });
+        } else {
+          setOauthNotice({
+            type: 'success',
+            message: `Successfully connected ${platformName} channel with full analytics permissions!`,
+            platform: connected as 'youtube' | 'instagram',
+          });
+        }
+        window.history.replaceState({}, document.title, window.location.pathname);
+        loadInitialData();
+      }
+    } catch (e) {
+      console.warn('OAuth URL param parsing notice:', e);
     }
   }, [currentUser]);
 
@@ -419,6 +470,76 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8 pb-24 sm:pb-8">
+        {/* Real OAuth Status / Error Feedback Banner */}
+        {oauthNotice && (
+          <div
+            className={`p-4 rounded-2xl border shadow-xl flex items-start justify-between gap-3 animate-fade-in ${
+              oauthNotice.type === 'error'
+                ? 'bg-red-950/80 border-red-800 text-red-200'
+                : oauthNotice.type === 'warning'
+                ? 'bg-amber-950/80 border-amber-800 text-amber-200'
+                : 'bg-emerald-950/80 border-emerald-800 text-emerald-200'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`p-2 rounded-xl shrink-0 mt-0.5 ${
+                  oauthNotice.type === 'error'
+                    ? 'bg-red-500/20 text-red-400'
+                    : oauthNotice.type === 'warning'
+                    ? 'bg-amber-500/20 text-amber-400'
+                    : 'bg-emerald-500/20 text-emerald-400'
+                }`}
+              >
+                {oauthNotice.type === 'error' ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : oauthNotice.type === 'warning' ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                    {oauthNotice.type === 'error'
+                      ? 'OAuth Authorization Notice'
+                      : oauthNotice.type === 'warning'
+                      ? 'Missing Permissions Detected'
+                      : 'Account Connected'}
+                  </h3>
+                  {oauthNotice.missingPermissions && oauthNotice.missingPermissions.length > 0 && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
+                      Missing: {oauthNotice.missingPermissions.join(', ')}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs leading-relaxed text-slate-200 font-medium">
+                  {oauthNotice.message}
+                </p>
+                {oauthNotice.type === 'warning' && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('accounts')}
+                    className="text-[11px] font-bold text-amber-300 hover:text-amber-200 underline mt-1 inline-block"
+                  >
+                    Go to Accounts to Reconnect &rarr;
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOauthNotice(null)}
+              className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors shrink-0"
+              title="Dismiss notice"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* TAB 1: Studio (Video Upload, Formatting & Publishing Flow) */}
         {activeTab === 'create' && (
           <div className="space-y-6 sm:space-y-8">

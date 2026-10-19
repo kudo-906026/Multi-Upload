@@ -118,27 +118,34 @@ router.get('/config/auth', (req: Request, res: Response) => {
  */
 router.get('/auth/youtube/callback', async (req: Request, res: Response) => {
   try {
-    const { code, state, error } = req.query;
-    if (error) {
-      return res.redirect(`/?auth_error=${encodeURIComponent(String(error))}`);
+    const { code, state, error, error_description } = req.query;
+    if (error || error_description) {
+      const errMsg = String(error_description || error);
+      console.warn('[YouTubeCallback] Real Google OAuth error:', errMsg);
+      return res.redirect(`/?auth_error=${encodeURIComponent(`Google OAuth error: ${errMsg}`)}&platform=youtube`);
     }
     if (!code) {
-      return res.redirect('/?auth_error=missing_code');
+      return res.redirect('/?auth_error=missing_code&platform=youtube');
     }
 
     const stateData = OAuthStateService.verifyState(String(state || ''), 'youtube');
     if (!stateData) {
       console.warn('[YouTubeCallback] Invalid or expired OAuth state');
       return res.redirect(
-        `/?auth_error=${encodeURIComponent('Security validation failed: Invalid or expired OAuth state. Please reconnect.')}`
+        `/?auth_error=${encodeURIComponent('Security validation failed: Invalid or expired OAuth state. Please reconnect.')}&platform=youtube`
       );
     }
 
-    await YouTubeService.handleCallback(String(code), stateData.userId);
-    return res.redirect('/?connected=youtube');
+    const account = await YouTubeService.handleCallback(String(code), stateData.userId);
+    let targetUrl = '/?connected=youtube';
+    if (account.missingPermissions && account.missingPermissions.length > 0) {
+      targetUrl += `&missing=${encodeURIComponent(account.missingPermissions.join(','))}`;
+    }
+    return res.redirect(targetUrl);
   } catch (err: any) {
     console.error('[YouTubeCallback] Error:', err);
-    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'OAuth exchange failed')}`);
+    const realMsg = err.response?.data?.error_description || err.response?.data?.error || err.message || 'Google OAuth exchange failed';
+    return res.redirect(`/?auth_error=${encodeURIComponent(realMsg)}&platform=youtube`);
   }
 });
 
@@ -152,11 +159,11 @@ router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
     const { code, state, error, error_description, error_reason } = req.query;
     if (error || error_description || error_reason) {
       const errMsg = String(error_description || error_reason || error);
-      console.warn('[InstagramCallback] OAuth error received from Instagram:', errMsg);
-      return res.redirect(`/?auth_error=${encodeURIComponent(errMsg)}`);
+      console.warn('[InstagramCallback] Real Meta OAuth error:', errMsg);
+      return res.redirect(`/?auth_error=${encodeURIComponent(`Meta OAuth error: ${errMsg}`)}&platform=instagram`);
     }
     if (!code) {
-      return res.redirect('/?auth_error=missing_code');
+      return res.redirect('/?auth_error=missing_code&platform=instagram');
     }
 
     const rawCode = String(code).replace(/#.*$/, '').trim();
@@ -164,15 +171,20 @@ router.get('/auth/instagram/callback', async (req: Request, res: Response) => {
     if (!stateData) {
       console.warn('[InstagramCallback] Invalid or expired OAuth state');
       return res.redirect(
-        `/?auth_error=${encodeURIComponent('Security validation failed: Invalid or expired OAuth state. Please reconnect.')}`
+        `/?auth_error=${encodeURIComponent('Security validation failed: Invalid or expired OAuth state. Please reconnect.')}&platform=instagram`
       );
     }
 
-    await InstagramService.handleCallback(rawCode, stateData.userId);
-    return res.redirect('/?connected=instagram');
+    const account = await InstagramService.handleCallback(rawCode, stateData.userId);
+    let targetUrl = '/?connected=instagram';
+    if (account.missingPermissions && account.missingPermissions.length > 0) {
+      targetUrl += `&missing=${encodeURIComponent(account.missingPermissions.join(','))}`;
+    }
+    return res.redirect(targetUrl);
   } catch (err: any) {
     console.error('[InstagramCallback] Error:', err);
-    return res.redirect(`/?auth_error=${encodeURIComponent(err.message || 'Instagram OAuth exchange failed')}`);
+    const realMsg = err.response?.data?.error_message || err.response?.data?.error?.message || err.message || 'Instagram OAuth exchange failed';
+    return res.redirect(`/?auth_error=${encodeURIComponent(realMsg)}&platform=instagram`);
   }
 });
 
@@ -201,9 +213,15 @@ router.post('/auth/youtube/callback', async (req: Request, res: Response) => {
     }
 
     const account = await YouTubeService.handleCallback(code, userId);
-    res.json({ success: true, data: account, message: `Connected YouTube channel: ${account.name}` });
+    res.json({
+      success: true,
+      data: account,
+      missingPermissions: account.missingPermissions,
+      message: `Connected YouTube channel: ${account.name}`,
+    });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const realMsg = err.response?.data?.error_description || err.response?.data?.error || err.message || 'YouTube authorization failed';
+    res.status(500).json({ success: false, error: realMsg });
   }
 });
 
@@ -232,9 +250,15 @@ router.post('/auth/instagram/callback', async (req: Request, res: Response) => {
     }
 
     const account = await InstagramService.handleCallback(code, userId);
-    res.json({ success: true, data: account, message: `Connected Instagram account: ${account.name}` });
+    res.json({
+      success: true,
+      data: account,
+      missingPermissions: account.missingPermissions,
+      message: `Connected Instagram account: ${account.name}`,
+    });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const realMsg = err.response?.data?.error_message || err.response?.data?.error?.message || err.message || 'Instagram authorization failed';
+    res.status(500).json({ success: false, error: realMsg });
   }
 });
 

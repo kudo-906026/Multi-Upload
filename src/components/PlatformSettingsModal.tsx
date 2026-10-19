@@ -140,7 +140,9 @@ TOKEN_ENCRYPTION_KEY=generate_a_random_32_char_key_here`;
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">OAuth Scopes:</span>
-                <span className="font-mono text-[10px] text-indigo-300">youtube.upload</span>
+                <span className="font-mono text-[9px] text-indigo-300 text-right">
+                  youtube.upload, youtube.readonly, yt-analytics.readonly
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Resumable Chunking:</span>

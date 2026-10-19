@@ -22,7 +22,10 @@ export class YouTubeService {
     const accounts = await AccountStorageService.getPublicAccounts(userId, 'youtube');
     const authenticated = accounts.length > 0;
     const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
-    const hasAnalyticsScope = accounts.some((a) => a.hasAnalyticsScope);
+    const hasAnalyticsScope = accounts.length > 0 && accounts.every((a) => a.hasAnalyticsScope);
+    const missingPermissions =
+      defaultAcc?.missingPermissions ||
+      (!hasAnalyticsScope && authenticated ? ['yt-analytics.readonly'] : []);
 
     return {
       configured,
@@ -30,12 +33,14 @@ export class YouTubeService {
       channelTitle: defaultAcc ? defaultAcc.name : undefined,
       needsReauth: !authenticated && configured,
       hasAnalyticsScope,
+      missingPermissions,
       accounts,
     };
   }
 
   /**
    * Generates Google OAuth 2.0 consent URL with signed state identifying the user.
+   * Scopes: youtube.upload, youtube.readonly, yt-analytics.readonly
    */
   static getAuthUrl(userId: string, customRedirectUri?: string): string {
     const redirectUri = customRedirectUri || config.google.redirectUri;
@@ -49,7 +54,6 @@ export class YouTubeService {
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly',
       'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/userinfo.profile',
     ];
 
     // Cryptographically signed state identifying the user
@@ -65,7 +69,7 @@ export class YouTubeService {
   }
 
   /**
-   * Exchanges authorization code for tokens and saves to the user's account storage.
+   * Exchanges authorization code for tokens, extracts granted scopes, and saves to the user's account storage.
    */
   static async handleCallback(
     code: string,
@@ -79,38 +83,97 @@ export class YouTubeService {
       redirectUri
     );
 
-    const { tokens } = await oauth2Client.getToken(code);
+    let tokens: any;
+    try {
+      const tokenRes = await oauth2Client.getToken(code);
+      tokens = tokenRes.tokens;
+    } catch (err: any) {
+      const googleError =
+        err.response?.data?.error_description ||
+        err.response?.data?.error ||
+        err.message ||
+        'Failed to exchange authorization code with Google';
+      console.error('[YouTubeService] Real Google OAuth error:', googleError, err.response?.data);
+      throw new Error(`Google OAuth error: ${googleError}`);
+    }
+
+    if (!tokens || !tokens.access_token) {
+      throw new Error('Google OAuth did not return a valid access token.');
+    }
+
     oauth2Client.setCredentials(tokens);
 
     // Fetch authorized YouTube Channel details
-    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
-    const channelRes = await youtube.channels.list({
-      mine: true,
-      part: ['snippet', 'id', 'statistics'],
-    });
+    let channelItem: any;
+    try {
+      const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+      const channelRes = await youtube.channels.list({
+        mine: true,
+        part: ['snippet', 'id', 'statistics'],
+      });
+      channelItem = channelRes.data.items?.[0];
+    } catch (err: any) {
+      const googleError =
+        err.response?.data?.error?.message ||
+        err.response?.data?.error_description ||
+        err.message ||
+        'Failed to query channel from YouTube API';
+      console.error('[YouTubeService] Real Google API error:', googleError);
+      throw new Error(`Google YouTube API error: ${googleError}`);
+    }
 
-    const channelItem = channelRes.data.items?.[0];
-    const channelId = channelItem?.id || `yt-${Date.now()}`;
-    const channelTitle = channelItem?.snippet?.title || 'YouTube Channel';
-    const channelHandle =
-      channelItem?.snippet?.customUrl ||
-      `@${channelTitle.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`;
-    const avatarUrl =
-      channelItem?.snippet?.thumbnails?.high?.url ||
-      channelItem?.snippet?.thumbnails?.medium?.url ||
-      channelItem?.snippet?.thumbnails?.default?.url;
-
-    const refreshToken = tokens.refresh_token || '';
-    if (!refreshToken) {
-      console.warn(
-        '[YouTubeService] Notice: Google did not return a refresh_token in this exchange (prompt=consent ensures it).'
+    if (!channelItem) {
+      throw new Error(
+        'No YouTube channel was found for this Google account. Please create a YouTube channel on this account or switch to an account with a channel.'
       );
     }
 
-    const grantedScopes = (tokens.scope as string) || '';
-    const hasAnalyticsScope =
-      grantedScopes.includes('yt-analytics.readonly') ||
-      grantedScopes.includes('youtube.readonly');
+    const channelId = channelItem.id || `yt-${Date.now()}`;
+    const channelTitle = channelItem.snippet?.title || 'YouTube Channel';
+    const channelHandle =
+      channelItem.snippet?.customUrl ||
+      `@${channelTitle.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`;
+    const avatarUrl =
+      channelItem.snippet?.thumbnails?.high?.url ||
+      channelItem.snippet?.thumbnails?.medium?.url ||
+      channelItem.snippet?.thumbnails?.default?.url;
+
+    // Check if account already exists to preserve refresh token if Google omitted it during re-consent
+    const existingAccounts = await AccountStorageService.getPublicAccounts(userId, 'youtube');
+    const existing = existingAccounts.find((a) => a.platformAccountId === channelId);
+
+    let refreshToken = tokens.refresh_token || '';
+    if (!refreshToken && existing) {
+      const existingTokens = AccountStorageService.getAccountTokens<YouTubeTokens>(userId, existing.id);
+      if (existingTokens?.tokens?.refreshToken) {
+        refreshToken = existingTokens.tokens.refreshToken;
+        console.log(`[YouTubeService] Preserved existing refresh token for channel ${channelId}`);
+      }
+    }
+
+    if (!refreshToken) {
+      console.warn(
+        '[YouTubeService] Notice: Google did not return a refresh_token and no existing token was found.'
+      );
+    }
+
+    // Read granted scopes from Google's token response
+    const scopeString = typeof tokens.scope === 'string' ? tokens.scope : '';
+    const grantedScopes = scopeString.split(/\s+/).filter(Boolean);
+
+    const hasScope = (target: string) =>
+      grantedScopes.some((s) => s === target || s.includes(target) || s.endsWith(`/${target}`));
+
+    const hasUpload = hasScope('youtube.upload');
+    const hasReadonly = hasScope('youtube.readonly');
+    const hasAnalytics = hasScope('yt-analytics.readonly');
+
+    const missingPermissions: string[] = [];
+    if (!hasUpload) missingPermissions.push('youtube.upload');
+    if (!hasReadonly) missingPermissions.push('youtube.readonly');
+    if (!hasAnalytics) missingPermissions.push('yt-analytics.readonly');
+
+    const hasAnalyticsScope = hasAnalytics;
 
     const savedAccount = await AccountStorageService.saveAccount(userId, {
       platform: 'youtube',
@@ -119,6 +182,8 @@ export class YouTubeService {
       handle: channelHandle,
       avatarUrl: avatarUrl || undefined,
       hasAnalyticsScope,
+      grantedScopes,
+      missingPermissions,
       tokens: {
         refreshToken: refreshToken || (tokens.access_token as string),
         accessToken: tokens.access_token || '',
@@ -127,7 +192,7 @@ export class YouTubeService {
     });
 
     console.log(
-      `[YouTubeService] Successfully connected YouTube channel: "${channelTitle}" (${channelId}) for user ${userId}`
+      `[YouTubeService] Successfully connected YouTube channel: "${channelTitle}" (${channelId}) for user ${userId}. Analytics granted: ${hasAnalyticsScope}. Missing: ${missingPermissions.join(', ') || 'none'}`
     );
     return savedAccount;
   }
@@ -211,24 +276,35 @@ export class YouTubeService {
 
     onProgress(30, 'Initiating resumable upload to YouTube API...');
 
-    const res = await youtube.videos.insert(
-      {
-        part: ['snippet', 'status'],
-        requestBody,
-        media: {
-          body: fs.createReadStream(storagePath),
+    let res: any;
+    try {
+      res = await youtube.videos.insert(
+        {
+          part: ['snippet', 'status'],
+          requestBody,
+          media: {
+            body: fs.createReadStream(storagePath),
+          },
         },
-      },
-      {
-        onUploadProgress: (evt) => {
-          if (evt.bytesRead && fileSize > 0) {
-            const rawProgress = 30 + Math.floor((evt.bytesRead / fileSize) * 60);
-            const progress = Math.min(90, rawProgress);
-            onProgress(progress, `Uploading to YouTube Shorts: ${progress}%`);
-          }
-        },
-      }
-    );
+        {
+          onUploadProgress: (evt) => {
+            if (evt.bytesRead && fileSize > 0) {
+              const rawProgress = 30 + Math.floor((evt.bytesRead / fileSize) * 60);
+              const progress = Math.min(90, rawProgress);
+              onProgress(progress, `Uploading to YouTube Shorts: ${progress}%`);
+            }
+          },
+        }
+      );
+    } catch (insertErr: any) {
+      const googleError =
+        insertErr.response?.data?.error?.message ||
+        insertErr.response?.data?.error_description ||
+        insertErr.message ||
+        'YouTube video upload failed';
+      console.error('[YouTubeService] Real Google upload error:', googleError, insertErr.response?.data);
+      throw new Error(`Google YouTube Upload error: ${googleError}`);
+    }
 
     const videoId = res.data.id;
     if (!videoId) {

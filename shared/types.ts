@@ -312,6 +312,8 @@ export interface ConnectedAccount {
   tokenDaysRemaining?: number; // Calculated for Instagram
   needsRefresh?: boolean;
   hasAnalyticsScope?: boolean;
+  grantedScopes?: string[];
+  missingPermissions?: string[];
   isDefault?: boolean;
 }
 
@@ -366,6 +368,7 @@ export interface PlatformAuthStatus {
     tokenExpiry?: string;
     needsReauth: boolean;
     hasAnalyticsScope?: boolean;
+    missingPermissions?: string[];
     accounts: ConnectedAccount[];
   };
   instagram: {
@@ -375,6 +378,7 @@ export interface PlatformAuthStatus {
     tokenDaysRemaining?: number;
     needsRefresh: boolean;
     hasAnalyticsScope?: boolean;
+    missingPermissions?: string[];
     accounts: ConnectedAccount[];
   };
   developerConfig?: {
@@ -497,6 +501,10 @@ export interface AnalyticsOverview {
   hasAnalyticsScope: {
     youtube: boolean;
     instagram: boolean;
+  };
+  missingPermissions?: {
+    youtube?: string[];
+    instagram?: string[];
   };
   lastSyncedAt: string;
 }

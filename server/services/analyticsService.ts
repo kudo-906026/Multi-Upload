@@ -15,6 +15,20 @@ export class AnalyticsService {
   private static cache: Map<string, { overview: AnalyticsOverview; timestamp: number }> = new Map();
   private static CACHE_TTL_MS = 15 * 60 * 1000; // 15 mins
 
+  static clearCache(userId?: string): void {
+    if (!userId) {
+      this.cache.clear();
+      console.log('[AnalyticsService] Invalided all analytics cache.');
+      return;
+    }
+    for (const key of Array.from(this.cache.keys())) {
+      if (key.startsWith(userId)) {
+        this.cache.delete(key);
+      }
+    }
+    console.log(`[AnalyticsService] Invalidated analytics cache for user ${userId}.`);
+  }
+
   /**
    * Main entry point: returns the complete analytics dashboard dataset.
    */
@@ -124,6 +138,10 @@ export class AnalyticsService {
       hasAnalyticsScope: {
         youtube: hasYtAnalytics,
         instagram: hasIgAnalytics,
+      },
+      missingPermissions: {
+        youtube: ytAccount?.account.missingPermissions || (!hasYtAnalytics && Boolean(ytAccount) ? ['yt-analytics.readonly'] : []),
+        instagram: igAccount?.account.missingPermissions || (!hasIgAnalytics && Boolean(igAccount) ? ['instagram_business_manage_insights'] : []),
       },
       lastSyncedAt: new Date().toISOString(),
     };
@@ -704,3 +722,9 @@ export class AnalyticsService {
     }
   }
 }
+
+// Automatically clear analytics cache whenever accounts/tokens are added, updated, reconnected, or removed
+AccountStorageService.addChangeListener((userId: string) => {
+  AnalyticsService.clearCache(userId);
+});
+

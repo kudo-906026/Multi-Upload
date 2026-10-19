@@ -23,6 +23,8 @@ export interface StoredAccountRecord {
   expiresAt?: string;
   isDefault?: boolean;
   hasAnalyticsScope?: boolean;
+  grantedScopes?: string[];
+  missingPermissions?: string[];
   encryptedTokens: EncryptedPayload;
 }
 
@@ -263,6 +265,8 @@ export class AccountStorageService {
       tokenDaysRemaining,
       needsRefresh,
       hasAnalyticsScope: Boolean(record.hasAnalyticsScope),
+      grantedScopes: record.grantedScopes,
+      missingPermissions: record.missingPermissions,
       isDefault: record.isDefault,
     };
   }
@@ -334,6 +338,22 @@ export class AccountStorageService {
     return this.getAccountTokens<T>(userId, selected.id);
   }
 
+  private static listeners: Array<(userId: string) => void> = [];
+
+  static addChangeListener(fn: (userId: string) => void): void {
+    this.listeners.push(fn);
+  }
+
+  private static notifyChange(userId: string): void {
+    this.listeners.forEach((fn) => {
+      try {
+        fn(userId);
+      } catch (err) {
+        console.warn('[AccountStorage] Change listener error:', err);
+      }
+    });
+  }
+
   /**
    * Saves or updates a connected account with encrypted tokens for a specific user.
    */
@@ -348,6 +368,8 @@ export class AccountStorageService {
       tokens: any;
       expiresAt?: string;
       hasAnalyticsScope?: boolean;
+      grantedScopes?: string[];
+      missingPermissions?: string[];
     }
   ): Promise<ConnectedAccount> {
     // Check if account already exists for this user with same platformAccountId
@@ -370,13 +392,19 @@ export class AccountStorageService {
       connectedAt: existing ? existing.connectedAt : new Date().toISOString(),
       expiresAt: params.expiresAt,
       isDefault: existing ? existing.isDefault : isFirstOfPlatform,
-      hasAnalyticsScope: params.hasAnalyticsScope ?? existing?.hasAnalyticsScope ?? false,
+      hasAnalyticsScope:
+        params.hasAnalyticsScope !== undefined
+          ? params.hasAnalyticsScope
+          : (existing?.hasAnalyticsScope ?? false),
+      grantedScopes: params.grantedScopes ?? existing?.grantedScopes,
+      missingPermissions: params.missingPermissions ?? existing?.missingPermissions,
       encryptedTokens: this.encrypt(params.tokens),
     };
 
     this.accounts.set(id, record);
     this.persistLocal();
     await this.persistToSupabase(record);
+    this.notifyChange(userId);
 
     return this.toPublicAccount(record);
   }
@@ -399,6 +427,7 @@ export class AccountStorageService {
     }
     this.persistLocal();
     await this.persistToSupabase(record);
+    this.notifyChange(userId);
     return true;
   }
 
@@ -410,6 +439,7 @@ export class AccountStorageService {
     if (deleted) {
       this.persistLocal();
       await this.deleteFromSupabase(userId, id);
+      this.notifyChange(userId);
     }
     return deleted;
   }
@@ -429,6 +459,7 @@ export class AccountStorageService {
     }
 
     this.persistLocal();
+    this.notifyChange(userId);
     return true;
   }
 }

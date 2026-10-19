@@ -298,10 +298,24 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ authStatus, onRefres
                     </div>
                   </div>
 
-                  <span className="text-[10px] px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Connected</span>
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    {account.hasAnalyticsScope ? (
+                      <span className="text-[10px] px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Full Stats Active</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleConnectYouTube}
+                        className="text-[10px] px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 transition-all"
+                        title="Reconnect to grant yt-analytics.readonly"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        <span>Missing: {account.missingPermissions?.join(', ') || 'yt-analytics.readonly'} (Reconnect)</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
@@ -421,10 +435,24 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ authStatus, onRefres
                   </div>
 
                   <div className="text-right space-y-1">
-                    <span className="text-[10px] px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold inline-flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Professional</span>
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      {account.hasAnalyticsScope ? (
+                        <span className="text-[10px] px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold inline-flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Full Insights Active</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleConnectInstagram}
+                          className="text-[10px] px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 transition-all"
+                          title="Reconnect to grant instagram_business_manage_insights"
+                        >
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          <span>Missing: {account.missingPermissions?.join(', ') || 'insights'} (Reconnect)</span>
+                        </button>
+                      )}
+                    </div>
                     {account.tokenDaysRemaining !== undefined && (
                       <div className="text-[10px] text-slate-400 block font-mono">
                         {account.tokenDaysRemaining}d remaining

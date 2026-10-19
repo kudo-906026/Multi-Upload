@@ -73,9 +73,56 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     loadAnalytics();
   }, []);
 
-  const needsReauthForAnalytics =
-    (authStatus?.youtube.authenticated && !overview?.hasAnalyticsScope.youtube) ||
-    (authStatus?.instagram.authenticated && !overview?.hasAnalyticsScope.instagram);
+  const [reconnectingPlatform, setReconnectingPlatform] = useState<'youtube' | 'instagram' | null>(null);
+
+  // Check scopes actually granted per platform separately
+  const ytAuthenticated = Boolean(authStatus?.youtube.authenticated);
+  const igAuthenticated = Boolean(authStatus?.instagram.authenticated);
+
+  const ytHasAnalyticsScope = Boolean(
+    overview?.hasAnalyticsScope?.youtube ?? authStatus?.youtube.hasAnalyticsScope
+  );
+  const igHasAnalyticsScope = Boolean(
+    overview?.hasAnalyticsScope?.instagram ?? authStatus?.instagram.hasAnalyticsScope
+  );
+
+  const ytMissing = (
+    overview?.missingPermissions?.youtube ||
+    authStatus?.youtube.missingPermissions ||
+    []
+  ).filter((p) => p.includes('analytics') || p.includes('readonly') || p.includes('upload'));
+  const igMissing = (
+    overview?.missingPermissions?.instagram ||
+    authStatus?.instagram.missingPermissions ||
+    []
+  ).filter((p) => p.includes('insights') || p.includes('publish') || p.includes('basic'));
+
+  const ytNeedsReauth = ytAuthenticated && !ytHasAnalyticsScope;
+  const igNeedsReauth = igAuthenticated && !igHasAnalyticsScope;
+
+  // Decide banner visibility per platform and active sub-tab
+  const showYouTubeBanner =
+    ytNeedsReauth && (platformSubTab === 'youtube' || platformSubTab === 'overview');
+  const showInstagramBanner =
+    igNeedsReauth && (platformSubTab === 'instagram' || platformSubTab === 'overview');
+
+  const handleDirectReconnect = async (platform: 'youtube' | 'instagram') => {
+    try {
+      setReconnectingPlatform(platform);
+      setErrorMsg(null);
+      if (platform === 'youtube') {
+        const url = await ApiClient.getYouTubeAuthUrl();
+        window.location.href = url;
+      } else {
+        const url = await ApiClient.getInstagramAuthUrl();
+        window.location.href = url;
+      }
+    } catch (err: any) {
+      console.error(`Failed to initiate ${platform} reconnect:`, err);
+      setErrorMsg(err.message || `Failed to initiate ${platform} reconnect.`);
+      setReconnectingPlatform(null);
+    }
+  };
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
@@ -154,32 +201,97 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
       </div>
 
-      {/* Reconnect Banner for Analytics Scopes */}
-      {needsReauthForAnalytics && (
-        <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-indigo-950/70 border border-amber-800/80 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+      {/* Reconnect Banner: YouTube Studio (decided from scopes actually granted) */}
+      {showYouTubeBanner && (
+        <div className="bg-gradient-to-r from-red-950/80 via-slate-900 to-amber-950/70 border border-red-800/80 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-300 shrink-0">
-              <ShieldAlert className="w-5 h-5 text-amber-400" />
+            <div className="p-2.5 bg-red-600/20 border border-red-600/40 rounded-xl text-red-400 shrink-0">
+              <Youtube className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                Reconnect Account to Enable Deep Analytics
-              </h3>
-              <p className="text-xs text-slate-300 mt-0.5">
-                Your connection needs additional read-only permissions (
-                <code className="text-amber-300 font-mono">yt-analytics.readonly</code> /{' '}
-                <code className="text-pink-300 font-mono">instagram_business_manage_insights</code>) to pull watch time retention and audience activity.
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                  YouTube Studio: Reconnect for Full Stats
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-300 font-mono font-bold border border-red-500/30">
+                  Missing: {ytMissing.join(', ') || 'yt-analytics.readonly'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1">
+                Your connected YouTube channel is missing the{' '}
+                <code className="text-amber-300 font-mono font-bold bg-black/40 px-1 py-0.5 rounded border border-amber-800/40">
+                  {ytMissing.join(', ') || 'yt-analytics.readonly'}
+                </code>{' '}
+                permission. Reconnect to pull watch time retention, view velocity, and audience analytics.
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onOpenAccounts}
-            className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-amber-600/30 shrink-0 self-start sm:self-auto"
-          >
-            Reconnect for Full Stats
-          </button>
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+            <button
+              type="button"
+              disabled={reconnectingPlatform === 'youtube'}
+              onClick={() => handleDirectReconnect('youtube')}
+              className="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-red-600/30 flex items-center gap-1.5 transition-all"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${reconnectingPlatform === 'youtube' ? 'animate-spin' : ''}`} />
+              <span>{reconnectingPlatform === 'youtube' ? 'Redirecting...' : 'Reconnect YouTube for Full Stats'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenAccounts}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium border border-slate-700 transition-all"
+            >
+              Accounts
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reconnect Banner: Instagram Insights (decided from scopes actually granted) */}
+      {showInstagramBanner && (
+        <div className="bg-gradient-to-r from-pink-950/80 via-slate-900 to-purple-950/70 border border-pink-800/80 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-pink-600/20 border border-pink-600/40 rounded-xl text-pink-400 shrink-0">
+              <Instagram className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                  Instagram Insights: Reconnect for Full Stats
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 font-mono font-bold border border-pink-500/30">
+                  Missing: {igMissing.join(', ') || 'instagram_business_manage_insights'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1">
+                Your Instagram connection is missing the{' '}
+                <code className="text-pink-300 font-mono font-bold bg-black/40 px-1 py-0.5 rounded border border-pink-800/40">
+                  {igMissing.join(', ') || 'instagram_business_manage_insights'}
+                </code>{' '}
+                permission. Reconnect to pull follower activity curves and reel retention data.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+            <button
+              type="button"
+              disabled={reconnectingPlatform === 'instagram'}
+              onClick={() => handleDirectReconnect('instagram')}
+              className="px-4 py-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-pink-600/30 flex items-center gap-1.5 transition-all"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${reconnectingPlatform === 'instagram' ? 'animate-spin' : ''}`} />
+              <span>{reconnectingPlatform === 'instagram' ? 'Redirecting...' : 'Reconnect Instagram for Full Stats'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenAccounts}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium border border-slate-700 transition-all"
+            >
+              Accounts
+            </button>
+          </div>
         </div>
       )}
 

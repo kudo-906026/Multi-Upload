@@ -56,7 +56,10 @@ export class InstagramService {
     const defaultAcc = accounts.find((a) => a.isDefault) || accounts[0];
 
     const needsRefresh = accounts.some((a) => a.needsRefresh);
-    const hasAnalyticsScope = accounts.some((a) => a.hasAnalyticsScope);
+    const hasAnalyticsScope = accounts.length > 0 && accounts.every((a) => a.hasAnalyticsScope);
+    const missingPermissions =
+      defaultAcc?.missingPermissions ||
+      (!hasAnalyticsScope && authenticated ? ['instagram_business_manage_insights'] : []);
 
     return {
       configured,
@@ -65,6 +68,7 @@ export class InstagramService {
       tokenDaysRemaining: defaultAcc?.tokenDaysRemaining,
       needsRefresh,
       hasAnalyticsScope,
+      missingPermissions,
       accounts,
     };
   }
@@ -220,10 +224,41 @@ export class InstagramService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + expiresInSec * 1000).toISOString();
 
+    // Check granted permissions
+    let grantedPermissions = [...permissions];
+    if (grantedPermissions.length === 0 && longLivedToken) {
+      try {
+        const permRes = await axios.get('https://graph.instagram.com/me/permissions', {
+          params: { access_token: longLivedToken },
+          timeout: 8000,
+        });
+        if (Array.isArray(permRes.data?.data)) {
+          grantedPermissions = permRes.data.data
+            .filter((p: any) => p.status === 'granted')
+            .map((p: any) => p.permission);
+        }
+      } catch (permErr: any) {
+        console.warn('[InstagramService] /me/permissions notice:', permErr.message);
+      }
+    }
+
     const hasAnalyticsScope =
-      permissions.length > 0
-        ? permissions.includes('instagram_business_manage_insights')
+      grantedPermissions.length > 0
+        ? grantedPermissions.includes('instagram_business_manage_insights')
         : true; // Granted as part of the 3 requested scopes
+
+    const missingPermissions: string[] = [];
+    if (grantedPermissions.length > 0) {
+      if (!grantedPermissions.includes('instagram_business_basic')) {
+        missingPermissions.push('instagram_business_basic');
+      }
+      if (!grantedPermissions.includes('instagram_business_content_publish')) {
+        missingPermissions.push('instagram_business_content_publish');
+      }
+      if (!grantedPermissions.includes('instagram_business_manage_insights')) {
+        missingPermissions.push('instagram_business_manage_insights');
+      }
+    }
 
     // Step 4: Encrypt and persist tokens to backend database (AES-256-GCM)
     const saved = await AccountStorageService.saveAccount(userId, {
@@ -233,6 +268,8 @@ export class InstagramService {
       handle: igUsername.startsWith('@') ? igUsername : `@${igUsername}`,
       avatarUrl,
       hasAnalyticsScope,
+      grantedScopes: grantedPermissions,
+      missingPermissions,
       tokens: {
         longLivedToken,
         userId: igUserId,
@@ -243,7 +280,7 @@ export class InstagramService {
     });
 
     console.log(
-      `[InstagramService] Successfully connected Instagram account: "${igName}" (${saved.handle}) for user ${userId} using Instagram Login!`
+      `[InstagramService] Successfully connected Instagram account: "${igName}" (${saved.handle}) for user ${userId}. Analytics granted: ${hasAnalyticsScope}. Missing: ${missingPermissions.join(', ') || 'none'}`
     );
     return saved;
   }
