@@ -699,17 +699,33 @@ router.post('/analyze', async (req: Request, res: Response) => {
       return res.status(429).json({ success: false, error: quotaCheck.error });
     }
 
-    const { filename, titleHint, descriptionHint, tone } = req.body;
+    const {
+      filename,
+      videoId,
+      storagePath,
+      titleHint,
+      descriptionHint,
+      tone,
+      confirmedTopic,
+      confirmedSeries,
+      confirmedCharacters,
+    } = req.body;
 
-    if (!filename) {
+    if (!filename && !videoId && !storagePath) {
       return res.status(400).json({ success: false, error: 'Filename or video identifier is required' });
     }
 
     const analysis = await GeminiService.analyzeVideo({
-      filename,
+      filename: filename || (videoId ? `${videoId}.mp4` : 'video.mp4'),
+      videoId,
+      storagePath,
       titleHint,
       descriptionHint,
       tone,
+      confirmedTopic,
+      confirmedSeries,
+      confirmedCharacters,
+      userId,
     });
 
     res.json({ success: true, data: analysis });

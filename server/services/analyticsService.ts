@@ -83,13 +83,10 @@ export class AnalyticsService {
       videoStats.push(...historyVideos);
     }
 
-    // If still under 3, populate realistic starter data for the user's connected channels
-    if (videoStats.length < 3) {
-      videoStats.push(...this.getStarterVideoAnalytics(userId, ytAccount?.account.name, igAccount?.account.name));
-    }
-
     // 3. Persist snapshots to Supabase
-    await this.persistSnapshotsToSupabase(userId, videoStats);
+    if (videoStats.length > 0) {
+      await this.persistSnapshotsToSupabase(userId, videoStats);
+    }
 
     // 4. Calculate aggregates
     let totalViews = 0;
@@ -111,7 +108,7 @@ export class AnalyticsService {
     const avgEngagementRate =
       totalViews > 0
         ? parseFloat((((totalLikes + totalComments + totalSharesSaves) / totalViews) * 100).toFixed(2))
-        : 5.4;
+        : 0;
 
     // 5. Views over time (last 14 days)
     const viewsOverTime = this.calculateViewsOverTime(videoStats);
@@ -377,6 +374,8 @@ export class AnalyticsService {
     ytName?: string,
     igName?: string
   ): VideoAnalytics[] {
+    return [];
+    /*
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
 
@@ -497,6 +496,7 @@ export class AnalyticsService {
         engagementRate: 7.4,
       },
     ];
+    */
   }
 
   /**

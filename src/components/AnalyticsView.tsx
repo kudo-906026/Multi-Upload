@@ -152,20 +152,25 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   // Derived YouTube Specific Metrics
   const ytVideos = (overview?.top10Videos || []).filter((v) => v.platform === 'youtube');
-  const ytTotalViews = overview?.youtubeViews || 148200;
-  const ytTotalWatchHours = ytVideos.reduce((acc, v) => acc + (v.watchTimeHours || 120), 0) || 540;
-  const ytAvgRetention = Math.round(
-    ytVideos.reduce((acc, v) => acc + (v.avgRetentionPercent || 82), 0) / (ytVideos.length || 1)
-  ) || 84;
-  const ytSubscribersGained = Math.round(ytTotalViews * 0.012) || 1780;
+  const ytTotalViews = overview?.youtubeViews || ytVideos.reduce((acc, v) => acc + (v.views || 0), 0);
+  const ytTotalWatchHours = ytVideos.reduce((acc, v) => acc + (v.watchTimeHours || 0), 0);
+  const ytAvgRetention = ytVideos.length > 0
+    ? Math.round(ytVideos.reduce((acc, v) => acc + (v.avgRetentionPercent || 0), 0) / ytVideos.length)
+    : 0;
+  const ytSubscribersGained = ytTotalViews > 0 ? Math.round(ytTotalViews * 0.012) : 0;
 
   // Derived Instagram Specific Metrics
   const igVideos = (overview?.top10Videos || []).filter((v) => v.platform === 'instagram');
-  const igTotalPlays = overview?.instagramViews || 214500;
-  const igReach = Math.round(igTotalPlays * 1.38) || 296000;
-  const igSaves = igVideos.reduce((acc, v) => acc + (v.saves || 450), 0) || 6840;
-  const igShares = igVideos.reduce((acc, v) => acc + (v.shares || 890), 0) || 12400;
-  const igFollows = Math.round(igTotalPlays * 0.009) || 1930;
+  const igTotalPlays = overview?.instagramViews || igVideos.reduce((acc, v) => acc + (v.views || 0), 0);
+  const igReach = igTotalPlays > 0 ? Math.round(igTotalPlays * 1.38) : 0;
+  const igSaves = igVideos.reduce((acc, v) => acc + (v.saves || 0), 0);
+  const igShares = igVideos.reduce((acc, v) => acc + (v.shares || 0), 0);
+  const igFollows = igTotalPlays > 0 ? Math.round(igTotalPlays * 0.009) : 0;
+
+  // Requirement: Never show invented numbers as real. When there are fewer than 3 videos,
+  // replace the starter benchmark data with an empty state: "Not enough data yet. Post at least 3 videos."
+  const totalVideosCount = (overview?.top10Videos || []).length;
+  const hasEnoughData = totalVideosCount >= 3;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-fade-in pb-12">
@@ -307,61 +312,93 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
       )}
 
-      {/* ============================================================== */}
-      {/* PLATFORM SUB-TABS: YOUTUBE VS INSTAGRAM VS COMBINED            */}
-      {/* ============================================================== */}
-      <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-2 shadow-lg">
-        {/* SUB-TAB 1: YOUTUBE STUDIO */}
-        <button
-          type="button"
-          onClick={() => {
-            setPlatformSubTab('youtube');
-            setChartMetric('youtube');
-          }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
-            platformSubTab === 'youtube'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-900/40 ring-1 ring-red-500'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Youtube className="w-4 h-4" />
-          <span>YouTube Studio (Views, Watch Time, Retention, Subs)</span>
-        </button>
+      {/* Empty State when fewer than 3 videos exist */}
+      {!hasEnoughData ? (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 sm:p-16 text-center space-y-5 shadow-2xl animate-fade-in my-4">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-950/70 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-lg">
+            <BarChart2 className="w-8 h-8" />
+          </div>
+          <div className="space-y-2 max-w-lg mx-auto">
+            <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+              Not enough data yet. Post at least 3 videos.
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+              Real-time views, watch-time retention velocity, virality benchmarks, and audience active hour heatmaps are calculated after publishing at least 3 videos.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-950 border border-slate-800 text-xs text-slate-300">
+              <span className={`w-2 h-2 rounded-full ${totalVideosCount > 0 ? 'bg-amber-400 animate-pulse' : 'bg-slate-600'}`} />
+              <span className="font-medium font-mono">{totalVideosCount} of 3 videos published</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadAnalytics(true)}
+              disabled={isRefreshing}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all disabled:opacity-50"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Syncing...' : 'Sync Now'}</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* ============================================================== */}
+          {/* PLATFORM SUB-TABS: YOUTUBE VS INSTAGRAM VS COMBINED            */}
+          {/* ============================================================== */}
+          <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-2 shadow-lg">
+            {/* SUB-TAB 1: YOUTUBE STUDIO */}
+            <button
+              type="button"
+              onClick={() => {
+                setPlatformSubTab('youtube');
+                setChartMetric('youtube');
+              }}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
+                platformSubTab === 'youtube'
+                  ? 'bg-red-600 text-white shadow-lg shadow-red-900/40 ring-1 ring-red-500'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Youtube className="w-4 h-4" />
+              <span>YouTube Studio (Views, Watch Time, Retention, Subs)</span>
+            </button>
 
-        {/* SUB-TAB 2: INSTAGRAM INSIGHTS */}
-        <button
-          type="button"
-          onClick={() => {
-            setPlatformSubTab('instagram');
-            setChartMetric('instagram');
-          }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
-            platformSubTab === 'instagram'
-              ? 'bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white shadow-lg shadow-pink-900/40 ring-1 ring-pink-500'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Instagram className="w-4 h-4" />
-          <span>Instagram Insights (Plays, Reach, Saves, Shares, Follows)</span>
-        </button>
+            {/* SUB-TAB 2: INSTAGRAM INSIGHTS */}
+            <button
+              type="button"
+              onClick={() => {
+                setPlatformSubTab('instagram');
+                setChartMetric('instagram');
+              }}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
+                platformSubTab === 'instagram'
+                  ? 'bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white shadow-lg shadow-pink-900/40 ring-1 ring-pink-500'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Instagram className="w-4 h-4" />
+              <span>Instagram Insights (Plays, Reach, Saves, Shares, Follows)</span>
+            </button>
 
-        {/* SUB-TAB 3: COMBINED OVERVIEW */}
-        <button
-          type="button"
-          onClick={() => {
-            setPlatformSubTab('overview');
-            setChartMetric('total');
-          }}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ml-auto ${
-            platformSubTab === 'overview'
-              ? 'bg-indigo-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <BarChart2 className="w-4 h-4" />
-          <span>Cross-Platform Overview</span>
-        </button>
-      </div>
+            {/* SUB-TAB 3: COMBINED OVERVIEW */}
+            <button
+              type="button"
+              onClick={() => {
+                setPlatformSubTab('overview');
+                setChartMetric('total');
+              }}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ml-auto ${
+                platformSubTab === 'overview'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <BarChart2 className="w-4 h-4" />
+              <span>Cross-Platform Overview</span>
+            </button>
+          </div>
 
       {/* ============================================================== */}
       {/* 1. YOUTUBE STUDIO SUB-TAB VIEW (RED THEME)                     */}
@@ -849,6 +886,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

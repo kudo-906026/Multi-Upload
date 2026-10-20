@@ -300,4 +300,83 @@ export class FFmpegService {
       });
     });
   }
+
+  /**
+   * Extracts between 6 and 8 keyframes evenly spaced across video duration as base64 JPEG images.
+   * Used as fallback for Gemini analysis when video file is too large or Files API fails.
+   */
+  static async extractKeyframes(
+    filePath: string,
+    targetCount: number = 7
+  ): Promise<Array<{ base64: string; timestampSec: number }>> {
+    const probe = await this.probeVideo(filePath);
+    const duration = Math.max(1, probe.duration);
+    const count = Math.max(6, Math.min(8, targetCount));
+    const keyframes: Array<{ base64: string; timestampSec: number }> = [];
+
+    // Calculate timestamps evenly distributed from 10% to 90% of duration
+    const timestamps: number[] = [];
+    for (let i = 1; i <= count; i++) {
+      const ts = (duration * i) / (count + 1);
+      timestamps.push(Math.round(ts * 100) / 100);
+    }
+
+    console.log(`[FFmpegService] Extracting ${count} keyframes from ${filePath} at timestamps: ${timestamps.join(', ')}s`);
+
+    const tmpDir = path.join(process.cwd(), 'uploads', 'temp_keyframes');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+
+    for (let idx = 0; idx < timestamps.length; idx++) {
+      const ts = timestamps[idx];
+      const tmpFile = path.join(tmpDir, `frame_${Date.now()}_${idx}.jpg`);
+      try {
+        await execFileAsync('ffmpeg', [
+          '-y',
+          '-ss',
+          ts.toString(),
+          '-i',
+          filePath,
+          '-vframes',
+          '1',
+          '-q:v',
+          '3',
+          '-vf',
+          "scale='min(720,iw)':-1",
+          tmpFile,
+        ]);
+
+        if (fs.existsSync(tmpFile)) {
+          const buffer = fs.readFileSync(tmpFile);
+          if (buffer.length > 0) {
+            keyframes.push({
+              base64: buffer.toString('base64'),
+              timestampSec: ts,
+            });
+          }
+          try {
+            fs.unlinkSync(tmpFile);
+          } catch {}
+        }
+      } catch (err: any) {
+        console.warn(`[FFmpegService] Could not extract keyframe at ${ts}s:`, err?.message);
+        if (fs.existsSync(tmpFile)) {
+          try {
+            fs.unlinkSync(tmpFile);
+          } catch {}
+        }
+      }
+    }
+
+    // Clean up temp directory if empty
+    try {
+      const remaining = fs.readdirSync(tmpDir);
+      if (remaining.length === 0) {
+        fs.rmdirSync(tmpDir);
+      }
+    } catch {}
+
+    return keyframes;
+  }
 }

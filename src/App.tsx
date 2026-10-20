@@ -639,6 +639,7 @@ export const App: React.FC = () => {
                   selectedPlatforms={selectedPlatforms}
                   onTogglePlatform={handleTogglePlatform}
                   aiResult={aiResult}
+                  onUpdateAiResult={(updated) => setAiResult(updated)}
                   video={currentVideo}
                   presets={presets}
                   authStatus={authStatus}

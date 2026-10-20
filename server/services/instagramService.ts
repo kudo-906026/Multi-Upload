@@ -48,6 +48,7 @@ export class InstagramService {
     tokenDaysRemaining?: number;
     needsRefresh: boolean;
     hasAnalyticsScope?: boolean;
+    missingPermissions?: string[];
     accounts: ConnectedAccount[];
   }> {
     const configured = Boolean(config.meta.appId && config.meta.appSecret);

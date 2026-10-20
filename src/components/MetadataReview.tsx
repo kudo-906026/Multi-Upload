@@ -21,11 +21,13 @@ import {
 } from '@shared/types';
 import { YouTubeStudioForm, YouTubeStudioFormState } from './studio/YouTubeStudioForm';
 import { InstagramReelsForm, InstagramReelsFormState } from './studio/InstagramReelsForm';
+import { DetectedEntitiesChips } from './DetectedEntitiesChips';
 
 interface MetadataReviewProps {
   selectedPlatforms: Platform[];
   onTogglePlatform?: (platform: Platform) => void;
   aiResult: AIAnalysisResult | null;
+  onUpdateAiResult?: (result: AIAnalysisResult) => void;
   video?: VideoMetadata | null;
   onPublish: (payloads: {
     youtubePayload?: YouTubePublishPayload;
@@ -59,6 +61,7 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
   selectedPlatforms,
   onTogglePlatform,
   aiResult,
+  onUpdateAiResult,
   video,
   onPublish,
   isPublishing,
@@ -376,35 +379,32 @@ export const MetadataReview: React.FC<MetadataReviewProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Top Banner: Recognized Character & Series from Gemini */}
-      {aiResult && (aiResult.recognizedCharacter || aiResult.recognizedSeries) && (
-        <div className="bg-gradient-to-r from-neutral-900 via-neutral-900 to-black border border-neutral-800 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-gradient-to-tr from-red-600 via-pink-600 to-purple-600 rounded-xl text-white shrink-0 shadow-md">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-pink-400">
-                  Gemini Dual-Platform Intelligence
-                </span>
-                {aiResult.editStyle && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                    {aiResult.editStyle}
-                  </span>
-                )}
-              </div>
-              <p className="text-sm font-semibold text-white mt-0.5">
-                Recognized: <span className="text-red-300">{aiResult.recognizedCharacter || 'Protagonist'}</span> in{' '}
-                <span className="text-purple-300">{aiResult.recognizedSeries || 'Universe'}</span>
-              </p>
-            </div>
-          </div>
-
-          <div className="text-xs text-neutral-400">
-            One video upload, analyzed once. Tailored SEO for YouTube and viral hooks for Instagram below.
+      {/* AI Offline Fallback Notice */}
+      {aiResult && (aiResult.isFallback || aiResult.aiOfflineNotice) && (
+        <div className="p-4 bg-amber-950/70 border border-amber-600/60 rounded-2xl flex items-start gap-3 text-amber-200 shadow-xl animate-fade-in">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+              Notice: AI is currently offline or unreachable
+            </h4>
+            <p className="text-xs text-amber-200/90 leading-relaxed">
+              {aiResult.aiOfflineNotice ||
+                'Metadata generated using an intelligent fallback template. Please review and confirm the detected chips below before publishing.'}
+            </p>
           </div>
         </div>
+      )}
+
+      {/* Editable Confirmed Entity Chips */}
+      {aiResult && aiResult.detections && (
+        <DetectedEntitiesChips
+          analysisResult={aiResult}
+          onUpdateAnalysis={(updated) => {
+            if (onUpdateAiResult) {
+              onUpdateAiResult(updated);
+            }
+          }}
+        />
       )}
 
       {/* Publish Error Notification */}

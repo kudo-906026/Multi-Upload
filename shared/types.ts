@@ -189,18 +189,47 @@ export interface NicheTrendReport {
   items: TrendItem[];
 }
 
+export type ConfidenceLevel = 'high' | 'medium' | 'low' | 'unsure';
+
+export interface DetectedEntity {
+  value: string;
+  confidence: ConfidenceLevel;
+  confirmed?: boolean;
+}
+
+export interface VideoDetections {
+  series: DetectedEntity;
+  characters: DetectedEntity[];
+  editStyle: DetectedEntity;
+  mood: DetectedEntity;
+  onScreenText: DetectedEntity[];
+}
+
+export interface LiveKeywordData {
+  topTags: string[];
+  topTitles: string[];
+  source: 'youtube_live' | 'grounded_trends';
+  queriedAt: string;
+}
+
 export interface AIAnalysisResult {
   topic: string;
   detectedTone: string;
   recognizedCharacter?: string; // Character recognized by Gemini (e.g. Gojo Satoru, Sung Jin-woo, Spider-Man)
   recognizedSeries?: string; // Series recognized by Gemini (e.g. Jujutsu Kaisen, Solo Leveling, Marvel MCU)
   editStyle?: string; // Edit style recognized by Gemini (e.g. Phonk Velocity, 4K HDR Flow, Cinematic Beat Sync)
+  mood?: string;
+  detections: VideoDetections;
+  liveKeywordData?: LiveKeywordData;
   keyInsights: string[];
   groundedTrends: GroundedTrend[];
   youtube: YouTubeGeneratedContent;
   instagram: InstagramGeneratedContent;
   predictedGrowth?: GrowthDataPoint[];
   analyzedAt: string;
+  isFallback?: boolean;
+  aiOfflineNotice?: string;
+  videoAnalysisMethod?: 'gemini_files_api' | 'ffmpeg_keyframes' | 'fallback_template';
 }
 
 export interface VideoMetadata {

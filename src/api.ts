@@ -311,9 +311,14 @@ export class ApiClient {
 
   static async analyzeVideo(params: {
     filename: string;
+    videoId?: string;
+    storagePath?: string;
     titleHint?: string;
     descriptionHint?: string;
     tone?: string;
+    confirmedTopic?: string;
+    confirmedSeries?: string;
+    confirmedCharacters?: string[];
   }): Promise<AIAnalysisResult> {
     const res = await safeFetch<AIAnalysisResult>(`${BASE_URL}/analyze`, {
       method: 'POST',

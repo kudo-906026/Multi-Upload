@@ -16,6 +16,7 @@ export class YouTubeService {
     channelTitle?: string;
     needsReauth: boolean;
     hasAnalyticsScope?: boolean;
+    missingPermissions?: string[];
     accounts: ConnectedAccount[];
   }> {
     const configured = Boolean(config.google.clientId && config.google.clientSecret);
@@ -162,7 +163,7 @@ export class YouTubeService {
     const grantedScopes = scopeString.split(/\s+/).filter(Boolean);
 
     const hasScope = (target: string) =>
-      grantedScopes.some((s) => s === target || s.includes(target) || s.endsWith(`/${target}`));
+      grantedScopes.some((s: string) => s === target || s.includes(target) || s.endsWith(`/${target}`));
 
     const hasUpload = hasScope('youtube.upload');
     const hasReadonly = hasScope('youtube.readonly');

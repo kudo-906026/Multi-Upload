@@ -1,9 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Globe, TrendingUp, Compass, CheckCircle2, ChevronDown, RefreshCw, FileDown } from 'lucide-react';
+import {
+  Sparkles,
+  Globe,
+  TrendingUp,
+  CheckCircle2,
+  RefreshCw,
+  FileDown,
+  AlertTriangle,
+  Video,
+  Layers,
+  Youtube,
+  Plus,
+} from 'lucide-react';
 import { AIAnalysisResult, VideoMetadata, AITone } from '@shared/types';
 import { ApiClient } from '../api';
 import { TrendGrowthChart } from './TrendGrowthChart';
 import { exportTrendAnalysisPDF } from '../utils/pdfExport';
+import { DetectedEntitiesChips } from './DetectedEntitiesChips';
 
 interface AIAnalysisCardProps {
   video: VideoMetadata | null;
@@ -42,6 +55,8 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
 
       const result = await ApiClient.analyzeVideo({
         filename: video.originalName,
+        videoId: video.id,
+        storagePath: video.storagePath || video.convertedPath,
         titleHint: topicHint.trim() || undefined,
         descriptionHint,
         tone: selectedTone,
@@ -51,6 +66,21 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
       setErrorMsg(err.message || 'AI analysis failed');
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleAddLiveKeywordToYtTags = (tag: string) => {
+    if (!analysisResult) return;
+    const currentTags = new Set(analysisResult.youtube.tags.map((t) => t.toLowerCase()));
+    if (!currentTags.has(tag.toLowerCase())) {
+      const updated = {
+        ...analysisResult,
+        youtube: {
+          ...analysisResult.youtube,
+          tags: [...analysisResult.youtube.tags, tag],
+        },
+      };
+      onAnalysisComplete(updated);
     }
   };
 
@@ -68,17 +98,17 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
         <div>
           <div className="flex items-center space-x-2">
             <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
-              2
+              3
             </span>
             <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span>Gemini AI Trend Analysis</span>
-              <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                Grounding Active
+              <span>Gemini AI Video Watch & Trend Analysis</span>
+              <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-medium">
+                Gemini 2.5 Flash Active
               </span>
             </h2>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Gemini searches live web trends to uncover current viral hashtags, high-CTR hooks, and platform-specific keywords.
+            Gemini watches the real video file via Files API (or keyframes fallback) and queries live YouTube search keywords to detect entities and craft viral metadata.
           </p>
         </div>
 
@@ -118,14 +148,15 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
               )}
             </div>
           )}
+
           <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            Video Subject / Topic Context (Optional)
+            Creator Context & Hints (Optional - Gemini watches video directly)
           </label>
           <input
             type="text"
             value={topicHint}
             onChange={(e) => setTopicHint(e.target.value)}
-            placeholder="e.g. Quick recipe, travel vlog in Tokyo, tech review, workout tip..."
+            placeholder="e.g. Quick recipe, travel vlog in Tokyo, anime phonk edit, clutch gameplay..."
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
           />
         </div>
@@ -170,80 +201,185 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
           {isAnalyzing ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin text-white" />
-              <span>Searching Google & Generating Grounded Content...</span>
+              <span>Uploading video to Gemini & Analyzing Visuals...</span>
             </>
           ) : (
             <>
               <Sparkles className="w-4 h-4 text-amber-300" />
               <span>
-                {analysisResult ? 'Re-Analyze with Live Trends' : 'Analyze Video with Gemini & Google Search Grounding'}
+                {analysisResult
+                  ? 'Re-Analyze Video with Gemini & YouTube Trends'
+                  : 'Watch Video with Gemini & Search Grounding'}
               </span>
             </>
           )}
         </button>
       </div>
 
-      {/* Grounded Trends & Insights Preview */}
+      {/* Offline Notice (Requirement 4: If AI offline and uses fallback template, show clear notice) */}
+      {analysisResult && (analysisResult.isFallback || analysisResult.aiOfflineNotice) && (
+        <div className="p-4 bg-amber-950/60 border border-amber-600/60 rounded-xl flex items-start gap-3 text-amber-200 animate-fade-in">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+              Notice: AI is currently offline or unreachable
+            </h4>
+            <p className="text-xs text-amber-200/90 leading-relaxed">
+              {analysisResult.aiOfflineNotice ||
+                'The app generated metadata using an intelligent fallback template. Please verify the detected series, character, and hashtag chips below to confirm your details before publishing.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Analysis Details & Editable Chips */}
       {analysisResult && (
-        <div className="bg-slate-950/90 border border-slate-800/90 rounded-xl p-4 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-slate-200">
-              <Globe className="w-4 h-4 text-blue-400" />
-              <span>Grounded Web Trends Found For: "{analysisResult.topic}"</span>
+        <div className="space-y-4">
+          {/* Video Analysis Method Badge */}
+          <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-950/60 border border-slate-800 px-3.5 py-2 rounded-xl">
+            <div className="flex items-center gap-2">
+              {analysisResult.videoAnalysisMethod === 'gemini_files_api' ? (
+                <>
+                  <Video className="w-4 h-4 text-emerald-400" />
+                  <span className="text-emerald-300 font-medium">
+                    Analysis Method: Gemini Files API (Video Stream - Low Resolution Quota Saver)
+                  </span>
+                </>
+              ) : analysisResult.videoAnalysisMethod === 'ffmpeg_keyframes' ? (
+                <>
+                  <Layers className="w-4 h-4 text-blue-400" />
+                  <span className="text-blue-300 font-medium">
+                    Analysis Method: 7 FFmpeg Keyframes (Inline Multimodal Fallback)
+                  </span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <span className="text-amber-300 font-medium">
+                    Analysis Method: Intelligent Fallback Template (Offline)
+                  </span>
+                </>
+              )}
             </div>
-            <span className="text-[11px] text-slate-400">Tone: {analysisResult.detectedTone}</span>
+            <span className="text-[11px] font-mono text-slate-500">
+              {new Date(analysisResult.analyzedAt).toLocaleTimeString()}
+            </span>
           </div>
 
-          {/* Search Grounding Queries & Keywords */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {analysisResult.groundedTrends?.map((trend, idx) => (
-              <div key={idx} className="bg-slate-900/90 border border-slate-800 rounded-lg p-3 space-y-2">
-                <div className="flex items-center space-x-1.5 text-xs text-indigo-400 font-mono">
-                  <TrendingUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <span className="truncate">"{trend.query}"</span>
+          {/* Requirement 2: Editable Chips for Series, Characters, Edit Style, Mood, On-screen text */}
+          {analysisResult.detections && (
+            <DetectedEntitiesChips
+              analysisResult={analysisResult}
+              onUpdateAnalysis={onAnalysisComplete}
+            />
+          )}
+
+          {/* Requirement 3: Live YouTube Search Keywords (search.list & videos.list) */}
+          {analysisResult.liveKeywordData && (
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                  <Youtube className="w-4 h-4 text-red-500" />
+                  <span>Live YouTube Search Keywords (Top 10 Video Tags & Titles)</span>
                 </div>
-                {trend.contextNote && (
-                  <p className="text-[11px] text-slate-400">{trend.contextNote}</p>
-                )}
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {trend.trendingKeywords.map((kw, kidx) => (
-                    <span
-                      key={kidx}
-                      className="px-2 py-0.5 rounded text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-medium"
-                    >
-                      {kw}
-                    </span>
-                  ))}
-                </div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  Cached 30m
+                </span>
               </div>
-            ))}
+              <p className="text-[11px] text-slate-400">
+                Click any live tag below to append it directly to your YouTube tags:
+              </p>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {analysisResult.liveKeywordData.topTags.map((tag, kidx) => {
+                  const isAlreadyAdded = analysisResult.youtube.tags
+                    .map((t) => t.toLowerCase())
+                    .includes(tag.toLowerCase());
+                  return (
+                    <button
+                      key={kidx}
+                      type="button"
+                      onClick={() => handleAddLiveKeywordToYtTags(tag)}
+                      disabled={isAlreadyAdded}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                        isAlreadyAdded
+                          ? 'bg-emerald-950/40 border border-emerald-600/40 text-emerald-300 cursor-default'
+                          : 'bg-red-950/30 border border-red-800/40 text-red-300 hover:bg-red-900/50 hover:text-white cursor-pointer active:scale-95'
+                      }`}
+                    >
+                      <span>{tag}</span>
+                      {isAlreadyAdded ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <Plus className="w-3 h-3 text-red-400" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Grounded Web Trends Preview */}
+          <div className="bg-slate-950/90 border border-slate-800/90 rounded-xl p-4 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center space-x-2 text-xs font-semibold text-slate-200">
+                <Globe className="w-4 h-4 text-blue-400" />
+                <span>Grounded Web Trends Found For: "{analysisResult.topic}"</span>
+              </div>
+              <span className="text-[11px] text-slate-400">Tone: {analysisResult.detectedTone}</span>
+            </div>
+
+            {/* Search Grounding Queries & Keywords */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {analysisResult.groundedTrends?.map((trend, idx) => (
+                <div key={idx} className="bg-slate-900/90 border border-slate-800 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center space-x-1.5 text-xs text-indigo-400 font-mono">
+                    <TrendingUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span className="truncate">"{trend.query}"</span>
+                  </div>
+                  {trend.contextNote && (
+                    <p className="text-[11px] text-slate-400">{trend.contextNote}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {trend.trendingKeywords.map((kw, kidx) => (
+                      <span
+                        key={kidx}
+                        className="px-2 py-0.5 rounded text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-medium"
+                      >
+                        {kw}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Strategic Insights */}
+            {analysisResult.keyInsights && (
+              <div className="pt-1">
+                <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block mb-1.5">
+                  Strategic Insights for Algorithmic Reach:
+                </span>
+                <ul className="text-xs text-slate-300 space-y-1 list-disc list-inside">
+                  {analysisResult.keyInsights.map((insight, idx) => (
+                    <li key={idx} className="leading-relaxed">
+                      {insight}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* D3 Trend Chart */}
+            {analysisResult.predictedGrowth && analysisResult.predictedGrowth.length > 0 && (
+              <div className="pt-2">
+                <TrendGrowthChart
+                  data={analysisResult.predictedGrowth}
+                  topic={analysisResult.topic}
+                />
+              </div>
+            )}
           </div>
-
-          {/* Key Insights */}
-          {analysisResult.keyInsights && (
-            <div className="pt-1">
-              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block mb-1.5">
-                Strategic Insights for Algorithmic Reach:
-              </span>
-              <ul className="text-xs text-slate-300 space-y-1 list-disc list-inside">
-                {analysisResult.keyInsights.map((insight, idx) => (
-                  <li key={idx} className="leading-relaxed">
-                    {insight}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* D3.js Predicted Trend Growth Line Chart */}
-          {analysisResult.predictedGrowth && analysisResult.predictedGrowth.length > 0 && (
-            <div className="pt-2">
-              <TrendGrowthChart
-                data={analysisResult.predictedGrowth}
-                topic={analysisResult.topic}
-              />
-            </div>
-          )}
         </div>
       )}
 
