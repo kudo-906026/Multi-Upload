@@ -4,9 +4,7 @@ import {
   Search,
   RefreshCw,
   Sparkles,
-  TrendingUp,
   Hash,
-  Music,
   ArrowRight,
   Globe,
   Youtube,
@@ -14,17 +12,15 @@ import {
   Check,
   Clock,
   AlertCircle,
-  AlertTriangle,
   ExternalLink,
   Key,
   Play,
-  RotateCcw,
   Zap,
   Music2,
   Calendar,
   ArrowUpDown,
-  Eye,
   ShieldAlert,
+  Music,
 } from 'lucide-react';
 import {
   NicheTrendReport,
@@ -40,11 +36,9 @@ interface TrendsViewProps {
 }
 
 const PRESET_NICHES = [
-  { id: 'anime edits (amv)', label: '⛩️ Anime edits (AMV)', query: 'anime edit' },
+  { id: 'anime edits', label: '⛩️ Anime edits', query: 'anime edit' },
   { id: 'marvel edits', label: '🛡️ Marvel edits', query: 'marvel edit' },
   { id: 'manhwa edits', label: '👑 Manhwa edits', query: 'manhwa edit' },
-  { id: 'gaming edits', label: '🎮 Gaming Velocity', query: 'gaming velocity edit' },
-  { id: 'cinema edits', label: '🎬 Cinema Aesthetic', query: 'cinematic movie edit' },
 ];
 
 const REGIONS = [
@@ -86,11 +80,8 @@ const INSTAGRAM_HOOK_FORMULAS = [
 ];
 
 /**
- * Robust Shorts video card with:
- * 1. IntersectionObserver lazy loading (only visible cards can create player instances)
- * 2. youtube-nocookie.com embed with referrerpolicy="strict-origin-when-cross-origin"
- * 3. Fallback to thumbnail with "Watch on YouTube" button if video fails to play
- * 4. Displays "x hours ago" and view counts
+ * 100% verified real Shorts video card:
+ * All metadata (title, channel, thumbnail, views, age, videoId) comes from one real YouTube API item.
  */
 const ShortsVideoCard: React.FC<{
   video: TrendingShortVideo;
@@ -101,7 +92,6 @@ const ShortsVideoCard: React.FC<{
   const [isInViewport, setIsInViewport] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
 
-  // Lazy loading observer: only cards in screen trigger player creation
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return;
@@ -117,7 +107,6 @@ const ShortsVideoCard: React.FC<{
           if (entry.isIntersecting) {
             setIsInViewport(true);
           } else {
-            // When scrolled off screen, pause player to free memory
             setIsPlaying(false);
           }
         });
@@ -143,7 +132,6 @@ const ShortsVideoCard: React.FC<{
     >
       {/* 9:16 Shorts Container */}
       <div className="relative aspect-[9/16] bg-black overflow-hidden flex items-center justify-center">
-        {/* State 1: Active Embed Player (Only when in viewport and user clicked play, without error) */}
         {isPlaying && isInViewport && !playbackError ? (
           <div className="w-full h-full relative">
             <iframe
@@ -155,7 +143,6 @@ const ShortsVideoCard: React.FC<{
               referrerPolicy="strict-origin-when-cross-origin"
               onError={() => setPlaybackError(true)}
             />
-            {/* Quick stop/fallback trigger in top-right */}
             <button
               type="button"
               onClick={() => setIsPlaying(false)}
@@ -166,7 +153,6 @@ const ShortsVideoCard: React.FC<{
             </button>
           </div>
         ) : playbackError ? (
-          /* State 2: Playback Failed Fallback (Never show broken player!) */
           <div className="relative w-full h-full flex flex-col justify-between p-4 text-center">
             <img
               src={video.thumbnailUrl}
@@ -187,7 +173,7 @@ const ShortsVideoCard: React.FC<{
               </div>
               <h5 className="text-xs font-bold text-white line-clamp-2">{video.title}</h5>
               <p className="text-[11px] text-slate-400">
-                Playback is restricted to official YouTube app & site by the channel.
+                Playback is restricted to official YouTube app & site by channel.
               </p>
             </div>
 
@@ -203,7 +189,6 @@ const ShortsVideoCard: React.FC<{
             </div>
           </div>
         ) : (
-          /* State 3: Clean Thumbnail with Play Overlay */
           <div
             onClick={() => setIsPlaying(true)}
             className="relative w-full h-full cursor-pointer group/thumb"
@@ -214,13 +199,12 @@ const ShortsVideoCard: React.FC<{
               loading="lazy"
               className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-500"
               onError={(e) => {
-                // Fallback to high-res or standard YouTube thumb
                 (e.currentTarget as HTMLImageElement).src = `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
               }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-black/40 group-hover/thumb:from-black/70 transition-colors" />
 
-            {/* Top Badges: Age ("x hours ago") and Shorts mark */}
+            {/* Top Badges */}
             <div className="absolute top-2.5 inset-x-2.5 flex items-center justify-between text-[10px] font-bold text-white z-10">
               <span className="px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md border border-white/10 flex items-center gap-1 text-slate-200">
                 <Clock className="w-2.5 h-2.5 text-red-400" />
@@ -239,7 +223,7 @@ const ShortsVideoCard: React.FC<{
               </div>
             </div>
 
-            {/* Bottom Info Bar over thumbnail: Views */}
+            {/* Bottom Info Bar: Real View Count */}
             <div className="absolute bottom-2.5 inset-x-2.5 flex items-center justify-between text-xs z-10">
               <span className="px-2 py-0.5 rounded-md bg-black/80 font-mono text-[11px] font-bold text-white backdrop-blur-sm border border-white/10">
                 {video.viewCount}
@@ -258,12 +242,12 @@ const ShortsVideoCard: React.FC<{
         )}
       </div>
 
-      {/* Card Metadata Footer */}
+      {/* Card Metadata Footer (Guaranteed to match the video) */}
       <div className="p-3.5 space-y-2 flex-1 flex flex-col justify-between bg-[#141414]">
         <div className="space-y-1">
           <h4
             onClick={handleOpenDirect}
-            className="text-xs font-bold text-white line-clamp-2 group-hover:text-red-400 transition-colors cursor-pointer"
+            className="text-xs font-bold text-white line-clamp-2 group-hover:text-red-400 transition-colors cursor-pointer leading-snug"
             title={video.title}
           >
             {video.title}
@@ -296,7 +280,7 @@ const ShortsVideoCard: React.FC<{
 
 export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) => {
   const [platformTab, setPlatformTab] = useState<'youtube' | 'instagram'>('youtube');
-  const [selectedNiche, setSelectedNiche] = useState('anime edits (amv)');
+  const [selectedNiche, setSelectedNiche] = useState('anime edits');
   const [customNicheInput, setCustomNicheInput] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('US');
   const [selectedTimeRange, setSelectedTimeRange] = useState<'24h' | '7d' | '30d'>('7d');
@@ -308,8 +292,17 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Success feedback state
-  const [copiedItem, setCopiedItem] = useState<string | null>(null);
+  // Time ticker to update "updated X min ago" live
+  const [, setTimeTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeTick((t) => t + 1);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Feedback state
   const [usedFeedback, setUsedFeedback] = useState<string | null>(null);
 
   const fetchTrends = async (
@@ -351,12 +344,6 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
     setSelectedNiche(customNicheInput.trim().toLowerCase());
   };
 
-  const handleCopyText = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedItem(text);
-    setTimeout(() => setCopiedItem(null), 2000);
-  };
-
   const handleUseKeywordInStudio = (kw: RankedKeyword) => {
     onUseTrendInStudio(kw.keyword, [`#${kw.keyword.replace(/\s+/g, '')}`], undefined, [kw.keyword]);
     setUsedFeedback(`Sent keyword "${kw.keyword}" to Studio!`);
@@ -381,6 +368,15 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
     setTimeout(() => setUsedFeedback(null), 3000);
   };
 
+  // Helper to format "Data from YouTube, updated X min ago"
+  const getUpdatedString = (lastUpdatedIso?: string) => {
+    if (!lastUpdatedIso) return 'Data from YouTube';
+    const elapsedMinutes = Math.max(0, Math.floor((Date.now() - new Date(lastUpdatedIso).getTime()) / 60000));
+    if (elapsedMinutes < 1) return 'Data from YouTube, updated just now';
+    if (elapsedMinutes === 1) return 'Data from YouTube, updated 1 min ago';
+    return `Data from YouTube, updated ${elapsedMinutes} min ago`;
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-fade-in pb-12">
       {/* Top Header Card */}
@@ -399,20 +395,20 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Verified embeddable YouTube Shorts & Instagram Reels trending analytics
+              Real YouTube Shorts edits in anime, Marvel, and manhwa niches
             </p>
           </div>
         </div>
 
-        {/* Refresh & 30-min Cache TTL Indicator */}
+        {/* Live Refresh & YouTube Data Timestamp Indicator */}
         <div className="flex items-center gap-3 self-end md:self-auto">
           {report && (
             <div className="text-right text-[11px] text-slate-400 hidden sm:block">
-              <div className="flex items-center gap-1 text-slate-300">
-                <Clock className="w-3 h-3 text-indigo-400" />
-                <span>30-Minute Quota Cache</span>
+              <div className="flex items-center gap-1.5 font-medium text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span>{getUpdatedString(report.lastUpdated)}</span>
               </div>
-              <span>Updated: {new Date(report.lastUpdated).toLocaleTimeString()}</span>
+              <span className="text-slate-500">30-min cache to preserve quota</span>
             </div>
           )}
 
@@ -430,12 +426,12 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
         </div>
       </div>
 
-      {/* YouTube API Quota Exceeded Banner */}
+      {/* Quota Notice Banner (if quota exceeded) */}
       {report?.quotaExceeded && (
         <div className="p-4 bg-amber-950/70 border border-amber-600/50 rounded-2xl text-amber-200 text-xs flex items-center justify-between gap-3 animate-fade-in shadow-lg">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
-              <AlertTriangle className="w-5 h-5" />
+              <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
               <strong className="block font-bold text-amber-300 text-sm">
@@ -443,7 +439,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
               </strong>
               <p className="text-amber-200/90 text-xs mt-0.5">
                 {report.quotaMessage ||
-                  'The daily YouTube Data API quota has been reached. Displaying verified cached trending Shorts until quota resets at midnight Pacific Time.'}
+                  'The daily YouTube Data API quota has been reached. Quota resets daily at midnight Pacific Time. In accordance with data integrity rules, placeholder data is not displayed.'}
               </p>
             </div>
           </div>
@@ -456,6 +452,25 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
           >
             Retry Refresh
           </button>
+        </div>
+      )}
+
+      {/* Missing Key Banner */}
+      {report?.isMissingKey && (
+        <div className="p-4 bg-amber-950/70 border border-amber-600/50 rounded-2xl text-amber-200 text-xs flex items-center justify-between gap-3 animate-fade-in shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+              <Key className="w-5 h-5" />
+            </div>
+            <div>
+              <strong className="block font-bold text-amber-300 text-sm">
+                YouTube Data API Key Not Configured
+              </strong>
+              <p className="text-amber-200/90 text-xs mt-0.5">
+                {report.errorMessage || 'Add YOUTUBE_API_KEY in your environment to fetch live videos directly from YouTube.'}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -473,7 +488,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
           }`}
         >
           <Youtube className="w-4 h-4" />
-          <span>YouTube Shorts Trends (Search Queries, High-CTR Titles, Embeddable Shorts)</span>
+          <span>YouTube Shorts Trends (Real Video Search & Embeds)</span>
         </button>
 
         <button
@@ -486,7 +501,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
           }`}
         >
           <Instagram className="w-4 h-4" />
-          <span>Instagram Reels Trends (Viral Audio Tracks, Hook Formulas, 5-Hashtag Sets)</span>
+          <span>Instagram Reels Trends (Audio & Hook Strategies)</span>
         </button>
       </div>
 
@@ -494,9 +509,8 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
       {/* COMPREHENSIVE FILTER CONTROLS: TIME RANGE, SORT, REGION, NICHE */}
       {/* ============================================================== */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4">
-        {/* Row 1: Time Range & Sort Filters + Region Dropdown */}
+        {/* Row 1: Time Range (24h, 7d default, 30d) + Sort & Region */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-800">
-          {/* Time Range Pills (Last 24 hours, Last 7 days, Last 30 days) */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mr-1">
               <Calendar className="w-3.5 h-3.5 text-indigo-400" />
@@ -519,7 +533,6 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
             ))}
           </div>
 
-          {/* Sort Selector & Region Dropdown */}
           <div className="flex flex-wrap items-center gap-3">
             {/* Sort: Most viewed vs Newest */}
             <div className="flex items-center gap-1.5">
@@ -555,7 +568,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
           </div>
         </div>
 
-        {/* Row 2: Niche Selector Pills & Custom Input */}
+        {/* Row 2: Niche Chips: Anime edits, Marvel edits, Manhwa edits + Custom */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-300 flex items-center gap-1 mr-1">
@@ -590,13 +603,13 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
               type="text"
               value={customNicheInput}
               onChange={(e) => setCustomNicheInput(e.target.value)}
-              placeholder="Custom niche (e.g. phonk, boxing)..."
+              placeholder="Custom keyword (e.g. jjk, deadpool)..."
               className="w-full sm:w-56 bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
               type="submit"
               className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors"
-              title="Search niche"
+              title="Search custom keyword"
             >
               <Search className="w-3.5 h-3.5" />
             </button>
@@ -630,108 +643,132 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
       {platformTab === 'youtube' && (
         <div className="space-y-6 animate-fade-in">
           {/* Sub-Tabs: Keywords / Hashtags / Title Ideas */}
-          <div className="flex items-center gap-2 border-b border-[#272727] pb-3">
-            {[
-              { id: 'keywords', label: 'High-Volume Search Queries', icon: Key },
-              { id: 'hashtags', label: 'Trending Shorts Hashtags', icon: Hash },
-              { id: 'titles', label: 'High-CTR Title Frameworks', icon: Zap },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveFinderTab(tab.id as any)}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                    activeFinderTab === tab.id
-                      ? 'bg-red-600 text-white shadow-md shadow-red-900/30'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          {report && (report.keywords.length > 0 || report.hashtags.length > 0 || report.titleIdeas.length > 0) && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-[#272727] pb-3">
+                {[
+                  { id: 'keywords', label: 'Computed Search Keywords', icon: Key },
+                  { id: 'hashtags', label: 'Top Shorts Hashtags', icon: Hash },
+                  { id: 'titles', label: 'Proven Title Frameworks', icon: Zap },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveFinderTab(tab.id as any)}
+                      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                        activeFinderTab === tab.id
+                          ? 'bg-red-600 text-white shadow-md shadow-red-900/30'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-          {/* Keywords Tab */}
-          {activeFinderTab === 'keywords' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {(report?.keywords || []).map((kw, idx) => (
-                <div
-                  key={idx}
-                  className="p-4 bg-[#141414] border border-[#272727] rounded-2xl flex items-center justify-between hover:border-red-600/50 transition-all group"
-                >
-                  <div>
-                    <span className="font-bold text-xs text-white group-hover:text-red-400 transition-colors">
-                      {kw.keyword}
-                    </span>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
-                      Volume: {kw.searchVolume || (kw.searchVolumeScore ? `${kw.searchVolumeScore}/100` : 'High')} • Score: {kw.difficultyScore || kw.searchVolumeScore || 85}/100
+              {/* Keywords Tab (Computed from real videos) */}
+              {activeFinderTab === 'keywords' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {(report?.keywords || []).map((kw, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 bg-[#141414] border border-[#272727] rounded-2xl flex items-center justify-between hover:border-red-600/50 transition-all group"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-white group-hover:text-red-400 transition-colors">
+                            {kw.keyword}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-950/80 border border-red-800/40 text-red-300 font-mono font-bold">
+                            {kw.searchVolumeScore}% presence
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400">
+                          {kw.relevance || `Found in ${kw.basedOnVideos || kw.frequency} of ${kw.totalVideosAnalyzed || report?.videos?.length || 0} top videos`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleUseKeywordInStudio(kw)}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-red-600/20 text-red-300 border border-red-600/40 hover:bg-red-600 hover:text-white transition-all shrink-0 ml-3"
+                      >
+                        Use
+                      </button>
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleUseKeywordInStudio(kw)}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-red-600/20 text-red-300 border border-red-600/40 hover:bg-red-600 hover:text-white transition-all"
-                  >
-                    Use in Studio
-                  </button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
 
-          {/* Hashtags Tab */}
-          {activeFinderTab === 'hashtags' && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {(report?.hashtags || []).map((h, idx) => (
-                <div
-                  key={idx}
-                  className="p-3.5 bg-[#141414] border border-[#272727] rounded-xl flex items-center justify-between hover:border-red-600/50 transition-all"
-                >
-                  <span className="font-mono text-xs font-bold text-red-300">{h.hashtag}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleUseHashtagInStudio(h)}
-                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#222]"
-                    title="Send to Studio"
-                  >
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Titles Tab */}
-          {activeFinderTab === 'titles' && (
-            <div className="space-y-3">
-              {(report?.titleIdeas || []).map((t, idx) => (
-                <div
-                  key={idx}
-                  className="p-4 bg-[#141414] border border-[#272727] rounded-2xl flex items-center justify-between hover:border-red-600/50 transition-all"
-                >
-                  <div className="space-y-1">
-                    <span className="font-bold text-xs text-white">{t.title}</span>
-                    <div className="text-[10px] text-slate-400">
-                      Strategy: {t.hookStrategy || 'High-energy hook'} • Estimated CTR: {t.estimatedCtrScore || 90}%
+              {/* Hashtags Tab (Computed from real videos) */}
+              {activeFinderTab === 'hashtags' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {(report?.hashtags || []).map((h, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3.5 bg-[#141414] border border-[#272727] rounded-xl flex items-center justify-between hover:border-red-600/50 transition-all"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-red-300">{h.hashtag}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
+                            {h.viralityScore}%
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {h.trendingReason || `Used in ${h.basedOnVideos || 1} videos`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleUseHashtagInStudio(h)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[#222]"
+                        title="Send hashtag to Studio"
+                      >
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleUseTitleInStudio(t)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-600 text-white shadow-sm hover:bg-red-500 transition-all shrink-0 ml-4"
-                  >
-                    Use in Studio
-                  </button>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Titles Tab (Derived with clear AI estimate labeling) */}
+              {activeFinderTab === 'titles' && (
+                <div className="space-y-3">
+                  {(report?.titleIdeas || []).map((t, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 bg-[#141414] border border-[#272727] rounded-2xl flex items-center justify-between hover:border-red-600/50 transition-all gap-4"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-white">{t.title}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-950/80 border border-indigo-700/50 text-indigo-300 font-bold uppercase tracking-wider">
+                            AI estimate
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {t.hookStrategy} • <span className="text-amber-400 font-medium">CTR Score: {t.estimatedCtrScore}% (AI estimate)</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleUseTitleInStudio(t)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-600 text-white shadow-sm hover:bg-red-500 transition-all shrink-0"
+                      >
+                        Use in Studio
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Embedded Top Performing YouTube Shorts */}
+          {/* Embedded Top Performing YouTube Shorts Section */}
           <div className="bg-[#141414] border border-[#272727] rounded-2xl p-5 shadow-xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#272727] pb-3">
               <div>
@@ -751,6 +788,11 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                 <span className="px-2.5 py-1 rounded-lg bg-black border border-[#272727] font-mono text-[11px] text-slate-300">
                   {report?.videos?.length || 0} Shorts Found
                 </span>
+                {report && (
+                  <span className="text-[11px] text-emerald-400 hidden md:inline">
+                    • {getUpdatedString(report.lastUpdated)}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -768,24 +810,103 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                 ))}
               </div>
             ) : (report?.videos || []).length === 0 ? (
-              <div className="py-12 text-center space-y-3">
-                <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                  <Search className="w-6 h-6" />
-                </div>
-                <h4 className="text-sm font-bold text-white">No Shorts Found For Selected Filters</h4>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Try switching the time range to &quot;Last 7 days&quot; or &quot;Last 30 days&quot;, or select another niche.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedTimeRange('7d');
-                    setSelectedSort('most_viewed');
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-md"
-                >
-                  Reset To Last 7 Days
-                </button>
+              /* Truthful Empty States (Never show fake results!) */
+              <div className="py-12 px-4 text-center space-y-4 max-w-lg mx-auto">
+                {report?.isMissingKey || report?.emptyReason === 'missing_key' ? (
+                  <>
+                    <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-950/40">
+                      <Key className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h4 className="text-base font-bold text-white">YouTube API Key Required</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        {report.errorMessage || 'YOUTUBE_API_KEY is not configured on the server. Please add your YouTube Data API v3 key in your environment variables, or connect a YouTube channel in Accounts.'}
+                      </p>
+                    </div>
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => fetchTrends(selectedNiche, selectedRegion, selectedTimeRange, selectedSort, true)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all inline-flex items-center gap-1.5"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Check Again</span>
+                      </button>
+                    </div>
+                  </>
+                ) : report?.quotaExceeded || report?.emptyReason === 'quota_exceeded' ? (
+                  <>
+                    <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto shadow-lg shadow-red-950/40">
+                      <ShieldAlert className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h4 className="text-base font-bold text-white">YouTube API Quota Limit Exceeded</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        {report.errorMessage || 'Daily quota for YouTube Data API v3 has been reached. Quota resets daily at midnight Pacific Time. In accordance with data integrity rules, placeholder data is not displayed.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => fetchTrends(selectedNiche, selectedRegion, selectedTimeRange, selectedSort, true)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-md shadow-red-900/30"
+                    >
+                      Retry Request
+                    </button>
+                  </>
+                ) : report?.emptyReason === 'request_failed' ? (
+                  <>
+                    <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-lg">
+                      <AlertCircle className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h4 className="text-base font-bold text-white">YouTube API Request Failed</h4>
+                      <p className="text-xs text-amber-200/90 font-mono bg-amber-950/40 border border-amber-800/40 p-2.5 rounded-xl break-words">
+                        {report.errorMessage || 'Unable to retrieve live videos from YouTube Data API.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => fetchTrends(selectedNiche, selectedRegion, selectedTimeRange, selectedSort, true)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Retry</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-14 h-14 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                      <Search className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h4 className="text-base font-bold text-white">No Matching Shorts Found</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        No embeddable YouTube Shorts matching the niche &quot;{selectedNiche}&quot; were found in the last {TIME_RANGES.find((t) => t.id === selectedTimeRange)?.label.toLowerCase()}.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                      {selectedTimeRange !== '30d' && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTimeRange('30d')}
+                          className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-md shadow-red-900/30"
+                        >
+                          Try Last 30 Days
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedNiche('anime edits');
+                          setSelectedTimeRange('7d');
+                        }}
+                        className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all"
+                      >
+                        Reset To Anime Edits (7 Days)
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

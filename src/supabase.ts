@@ -89,6 +89,7 @@ export async function loadRuntimeConfig(): Promise<{
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
+          storage: typeof window !== 'undefined' ? window.localStorage : undefined,
         },
       });
 
@@ -184,6 +185,10 @@ export async function getCurrentUser(): Promise<User | null> {
     const client = await getSupabase();
     if (!client) return null;
 
+    // First check local persisted session
+    const { data: { session } } = await client.auth.getSession();
+    if (session?.user) return session.user;
+
     const { data: { user } } = await client.auth.getUser();
     return user;
   } catch (err) {
@@ -193,17 +198,39 @@ export async function getCurrentUser(): Promise<User | null> {
 }
 
 /**
+ * Returns current session or null.
+ */
+export async function getCurrentSession(): Promise<{ user: User | null; session: any | null }> {
+  try {
+    const client = await getSupabase();
+    if (!client) return { user: null, session: null };
+
+    const { data: { session }, error } = await client.auth.getSession();
+    if (error || !session) {
+      const { data: { user } } = await client.auth.getUser();
+      return { user: user || null, session: null };
+    }
+    return { user: session.user, session };
+  } catch (err) {
+    console.warn('[SupabaseAuth] getCurrentSession error:', err);
+    return { user: null, session: null };
+  }
+}
+
+/**
  * Sign in with email and password safely.
+ * Returns real Supabase error on failure.
  */
 export async function signInWithEmail(
   email: string,
   password: string
-): Promise<{ user: User | null; error?: string }> {
+): Promise<{ user: User | null; session: any | null; error?: string }> {
   try {
     const client = await getSupabase();
     if (!client) {
       return {
         user: null,
+        session: null,
         error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY. Please configure your Supabase variables in Render.',
       };
     }
@@ -214,26 +241,47 @@ export async function signInWithEmail(
     });
 
     if (error) {
-      return { user: null, error: error.message };
+      return { user: null, session: null, error: error.message };
     }
-    return { user: data.user };
+
+    if (!data.session || !data.user) {
+      return {
+        user: null,
+        session: null,
+        error: 'Sign in succeeded but no active session was returned. Please try again.',
+      };
+    }
+
+    return { user: data.user, session: data.session };
   } catch (err: any) {
-    return { user: null, error: err.message || 'An error occurred during sign-in' };
+    return { user: null, session: null, error: err.message || 'An error occurred during sign-in' };
   }
 }
 
 /**
  * Sign up with email and password safely.
+ * Checks the Supabase response:
+ * - If email already exists or no session comes back: shows "This email already has an account. Sign in instead."
+ * - Never opens the app without a real session.
+ * - If email confirmation is needed: shows "Check your email to confirm".
  */
 export async function signUpWithEmail(
   email: string,
   password: string
-): Promise<{ user: User | null; message?: string; error?: string }> {
+): Promise<{
+  user: User | null;
+  session: any | null;
+  message?: string;
+  error?: string;
+  alreadyExists?: boolean;
+  needsConfirmation?: boolean;
+}> {
   try {
     const client = await getSupabase();
     if (!client) {
       return {
         user: null,
+        session: null,
         error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY. Please configure your Supabase variables in Render.',
       };
     }
@@ -244,19 +292,71 @@ export async function signUpWithEmail(
     });
 
     if (error) {
-      return { user: null, error: error.message };
+      const msg = (error.message || '').toLowerCase();
+      if (
+        msg.includes('already registered') ||
+        msg.includes('user already exists') ||
+        msg.includes('already exists') ||
+        msg.includes('email already in use')
+      ) {
+        return {
+          user: null,
+          session: null,
+          alreadyExists: true,
+          error: 'This email already has an account. Sign in instead.',
+        };
+      }
+      return { user: null, session: null, error: error.message };
     }
 
-    const needsConfirmation = !data.session && data.user && data.user.identities && data.user.identities.length > 0;
+    // In Supabase, if an email already exists (and email confirmation is enabled),
+    // it returns 200 with data.user.identities = [] and data.session = null
+    const isExistingUser =
+      data.user &&
+      Array.isArray(data.user.identities) &&
+      data.user.identities.length === 0;
 
+    if (isExistingUser) {
+      return {
+        user: null,
+        session: null,
+        alreadyExists: true,
+        error: 'This email already has an account. Sign in instead.',
+      };
+    }
+
+    // Check if a real session came back
+    if (!data.session) {
+      // Check if email confirmation is required for a new unconfirmed user
+      const hasIdentities = data.user && Array.isArray(data.user.identities) && data.user.identities.length > 0;
+      const isUnconfirmed = data.user && !data.user.confirmed_at && !data.user.email_confirmed_at;
+
+      if (hasIdentities && isUnconfirmed) {
+        return {
+          user: data.user,
+          session: null,
+          needsConfirmation: true,
+          message: 'Check your email to confirm',
+        };
+      }
+
+      // If no session came back and not pending confirmation, treat as existing account
+      return {
+        user: null,
+        session: null,
+        alreadyExists: true,
+        error: 'This email already has an account. Sign in instead.',
+      };
+    }
+
+    // A real session was returned
     return {
       user: data.user,
-      message: needsConfirmation
-        ? 'Account created! Please check your email for the confirmation link to sign in.'
-        : 'Account created successfully!',
+      session: data.session,
+      message: 'Account created successfully!',
     };
   } catch (err: any) {
-    return { user: null, error: err.message || 'An error occurred during sign-up' };
+    return { user: null, session: null, error: err.message || 'An error occurred during sign-up' };
   }
 }
 
@@ -304,6 +404,29 @@ export async function resetPasswordForEmail(
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to request password reset' };
+  }
+}
+
+/**
+ * Updates the authenticated user's password (e.g. after following password reset link).
+ */
+export async function updateUserPassword(
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = await getSupabase();
+    if (!client) {
+      return { success: false, error: cachedConfigError || 'Config missing: SUPABASE_ANON_KEY' };
+    }
+
+    const { error } = await client.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update password' };
   }
 }
 

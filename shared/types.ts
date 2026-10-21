@@ -120,6 +120,7 @@ export interface TrendingShortVideo {
   description?: string;
   durationSec?: number;
   isEmbeddable?: boolean;
+  rawViewCount?: number;
 }
 
 export interface RankedKeyword {
@@ -129,12 +130,18 @@ export interface RankedKeyword {
   relevance: string;
   searchVolume?: string | number;
   difficultyScore?: number;
+  basedOnVideos?: number; // Real number of videos this keyword appeared in
+  totalVideosAnalyzed?: number;
+  scoreType?: 'computed' | 'ai_estimate';
 }
 
 export interface RankedHashtag {
   hashtag: string;
   viralityScore: number; // 1 - 100
   trendingReason: string;
+  basedOnVideos?: number; // Real number of videos using this hashtag
+  totalVideosAnalyzed?: number;
+  scoreType?: 'computed' | 'ai_estimate';
 }
 
 export interface TitleIdea {
@@ -143,6 +150,7 @@ export interface TitleIdea {
   targetPlatform: 'youtube' | 'instagram' | 'both';
   hookStrategy: string;
   estimatedCtrScore: number; // 1 - 100
+  scoreType?: 'computed' | 'ai_estimate';
 }
 
 export interface NicheBreakdown {
@@ -179,8 +187,12 @@ export interface NicheTrendReport {
   sort?: 'newest' | 'most_viewed';
   quotaExceeded?: boolean;
   quotaMessage?: string;
+  isMissingKey?: boolean;
+  errorMessage?: string;
+  emptyReason?: 'missing_key' | 'quota_exceeded' | 'request_failed' | 'no_results' | null;
   lastUpdated: string;
   cachedUntil: string;
+  dataSource?: 'youtube_api' | 'none';
   videos: TrendingShortVideo[];
   keywords: RankedKeyword[];
   hashtags: RankedHashtag[];

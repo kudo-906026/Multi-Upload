@@ -99,6 +99,20 @@ async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';
   const rootDir = process.cwd();
 
+  // sw.js MUST never be cached by browsers in any environment
+  app.get('/sw.js', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Content-Type', 'application/javascript');
+    const clientDistPath = path.resolve(rootDir, 'dist/client/sw.js');
+    const publicPath = path.resolve(rootDir, 'public/sw.js');
+    const targetPath = isProduction && fs.existsSync(clientDistPath) ? clientDistPath : publicPath;
+    if (fs.existsSync(targetPath)) {
+      res.sendFile(targetPath);
+    } else {
+      res.status(404).send('// Service worker not found');
+    }
+  });
+
   if (!isProduction) {
     try {
       console.log('[Server] Initializing Vite dev server in middleware mode...');
@@ -118,12 +132,6 @@ async function startServer() {
     // Production: serve built static files from dist/client
     const clientDistPath = path.resolve(rootDir, 'dist/client');
     if (fs.existsSync(clientDistPath)) {
-      // sw.js MUST never be cached by browsers
-      app.get('/sw.js', (req, res) => {
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-        res.setHeader('Content-Type', 'application/javascript');
-        res.sendFile(path.join(clientDistPath, 'sw.js'));
-      });
 
       app.use(
         express.static(clientDistPath, {

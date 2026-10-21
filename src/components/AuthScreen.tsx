@@ -1,30 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Lock,
   Mail,
   ArrowRight,
-  Sparkles,
   ShieldCheck,
   Eye,
   EyeOff,
   AlertCircle,
   CheckCircle2,
   KeyRound,
-  UserCheck,
 } from 'lucide-react';
 import {
   signInWithEmail,
   signUpWithEmail,
   signInWithGoogle,
   resetPasswordForEmail,
+  updateUserPassword,
 } from '../supabase';
 
 interface AuthScreenProps {
   onAuthSuccess: (user: any) => void;
+  isPasswordReset?: boolean;
+  onPasswordResetDone?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot_password'>('login');
+export const AuthScreen: React.FC<AuthScreenProps> = ({
+  onAuthSuccess,
+  isPasswordReset = false,
+  onPasswordResetDone,
+}) => {
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot_password' | 'reset_password'>(
+    isPasswordReset ? 'reset_password' : 'login'
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -34,18 +41,65 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (isPasswordReset) {
+      setMode('reset_password');
+      setErrorMsg(null);
+      setSuccessMsg(null);
+    }
+  }, [isPasswordReset]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
 
     const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setErrorMsg('Please enter your email address.');
+
+    // 1. Password Reset Mode (Setting new password after email link)
+    if (mode === 'reset_password') {
+      if (!password) {
+        setErrorMsg('Please enter your new password.');
+        return;
+      }
+      if (password.length < 6) {
+        setErrorMsg('Password must be at least 6 characters long.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setErrorMsg('Passwords do not match.');
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const res = await updateUserPassword(password);
+        if (res.success) {
+          setSuccessMsg('Password updated successfully! You can now sign in with your new password.');
+          setPassword('');
+          setConfirmPassword('');
+          if (onPasswordResetDone) onPasswordResetDone();
+          setTimeout(() => {
+            setMode('login');
+          }, 2000);
+        } else {
+          setErrorMsg(res.error || 'Failed to update password.');
+        }
+      } catch (err: any) {
+        setErrorMsg(err.message || 'An error occurred while updating password.');
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
+    // 2. Forgot Password Mode (Requesting reset email)
     if (mode === 'forgot_password') {
+      if (!cleanEmail) {
+        setErrorMsg('Please enter your email address.');
+        return;
+      }
+
       setIsLoading(true);
       try {
         const res = await resetPasswordForEmail(cleanEmail);
@@ -62,11 +116,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       return;
     }
 
+    // General validation for Email & Password
+    if (!cleanEmail) {
+      setErrorMsg('Please enter your email address.');
+      return;
+    }
+
     if (!password) {
       setErrorMsg('Please enter your password.');
       return;
     }
 
+    // 3. Register Mode
     if (mode === 'register') {
       if (password.length < 6) {
         setErrorMsg('Password must be at least 6 characters long.');
@@ -82,12 +143,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         const res = await signUpWithEmail(cleanEmail, password);
         if (res.error) {
           setErrorMsg(res.error);
-        } else if (res.user) {
-          if (res.message && res.message.includes('check your email')) {
-            setSuccessMsg(res.message);
-          } else {
-            onAuthSuccess(res.user);
-          }
+        } else if (res.needsConfirmation || (res.message && res.message.includes('confirm'))) {
+          // If email confirmation is needed, show "Check your email to confirm"
+          setSuccessMsg(res.message || 'Check your email to confirm');
+          // NEVER open the app without a real session
+        } else if (res.session && res.user) {
+          // Only open the app with a real session
+          onAuthSuccess(res.user);
+        } else {
+          // No session came back
+          setErrorMsg('This email already has an account. Sign in instead.');
         }
       } catch (err: any) {
         setErrorMsg(err.message || 'Sign up failed.');
@@ -97,14 +162,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       return;
     }
 
-    // Login mode
+    // 4. Login Mode
     setIsLoading(true);
     try {
       const res = await signInWithEmail(cleanEmail, password);
       if (res.error) {
+        // Show the real Supabase error on sign-in failures
         setErrorMsg(res.error);
-      } else if (res.user) {
+      } else if (res.user && res.session) {
         onAuthSuccess(res.user);
+      } else {
+        setErrorMsg('Could not establish an authenticated session. Please try again.');
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Login failed.');
@@ -158,8 +226,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
         {/* Auth Card */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
-          {/* Mode Tabs */}
-          {mode !== 'forgot_password' && (
+          {/* Mode Tabs (Only for Login & Register) */}
+          {mode !== 'forgot_password' && mode !== 'reset_password' && (
             <div className="flex bg-slate-950/60 p-1 rounded-xl border border-slate-800/80 mb-6">
               <button
                 type="button"
@@ -194,6 +262,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             </div>
           )}
 
+          {/* Forgot Password Header */}
           {mode === 'forgot_password' && (
             <div className="mb-6">
               <button
@@ -209,7 +278,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               </button>
               <h2 className="text-lg font-bold text-white">Reset your password</h2>
               <p className="text-xs text-slate-400 mt-1">
-                Enter your email and we'll send you instructions to reset your password.
+                Enter your email and we'll send you a link to reset your password.
+              </p>
+            </div>
+          )}
+
+          {/* Reset Password Header (Update Password) */}
+          {mode === 'reset_password' && (
+            <div className="mb-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setErrorMsg(null);
+                  setSuccessMsg(null);
+                  if (onPasswordResetDone) onPasswordResetDone();
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium inline-flex items-center mb-2"
+              >
+                ← Back to Sign In
+              </button>
+              <div className="flex items-center space-x-2">
+                <KeyRound className="w-5 h-5 text-indigo-400" />
+                <h2 className="text-lg font-bold text-white">Set New Password</h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Enter and confirm your new password below.
               </p>
             </div>
           )}
@@ -218,7 +312,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           {errorMsg && (
             <div className="mb-4 p-3 bg-red-950/50 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-start space-x-2">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
+              <div className="flex-1">
+                <span>{errorMsg}</span>
+                {errorMsg.includes('Sign in instead') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setErrorMsg(null);
+                    }}
+                    className="block mt-1 font-semibold text-indigo-400 hover:text-indigo-300 underline"
+                  >
+                    Click here to Sign In
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -231,29 +339,33 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email Input */}
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Email Address</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
-                  <Mail className="w-4 h-4" />
+            {/* Email Input (Not needed for reset_password mode) */}
+            {mode !== 'reset_password' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">Email Address</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="creator@example.com"
+                    required
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  />
                 </div>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="creator@example.com"
-                  required
-                  className="w-full pl-9 pr-3 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                />
               </div>
-            </div>
+            )}
 
-            {/* Password Input (Login & Register modes) */}
+            {/* Password Input (Login, Register & Reset Password modes) */}
             {mode !== 'forgot_password' && (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-medium text-slate-300">Password</label>
+                  <label className="block text-xs font-medium text-slate-300">
+                    {mode === 'reset_password' ? 'New Password' : 'Password'}
+                  </label>
                   {mode === 'login' && (
                     <button
                       type="button"
@@ -278,6 +390,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     required
+                    minLength={6}
                     className="w-full pl-9 pr-10 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                   />
                   <button
@@ -291,10 +404,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               </div>
             )}
 
-            {/* Confirm Password (Register mode) */}
-            {mode === 'register' && (
+            {/* Confirm Password (Register and Reset Password modes) */}
+            {(mode === 'register' || mode === 'reset_password') && (
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5">Confirm Password</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  {mode === 'reset_password' ? 'Confirm New Password' : 'Confirm Password'}
+                </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
                     <Lock className="w-4 h-4" />
@@ -305,6 +420,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
                     required
+                    minLength={6}
                     className="w-full pl-9 pr-3 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                   />
                 </div>
@@ -326,6 +442,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                       ? 'Sign In'
                       : mode === 'register'
                       ? 'Create Account'
+                      : mode === 'reset_password'
+                      ? 'Update Password'
                       : 'Send Reset Link'}
                   </span>
                   <ArrowRight className="w-4 h-4" />
@@ -334,8 +452,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             </button>
           </form>
 
-          {/* Divider */}
-          {mode !== 'forgot_password' && (
+          {/* Divider & Google Sign-In */}
+          {mode !== 'forgot_password' && mode !== 'reset_password' && (
             <>
               <div className="relative my-6">
                 <div className="absolute inset-0 flex items-center">

@@ -1,5 +1,6 @@
 // Unique build version placeholder (replaced during build with unique timestamp/hash)
-const CACHE_VERSION = '__BUILD_VERSION__';
+const RAW_BUILD_VERSION = '__BUILD_VERSION__';
+const CACHE_VERSION = RAW_BUILD_VERSION.includes('__') ? 'dev-' + Date.now() : RAW_BUILD_VERSION;
 const CACHE_NAME = 'omnipost-v-' + CACHE_VERSION;
 
 // Core assets to pre-cache (excluding index.html to prevent stale entry points)
@@ -28,8 +29,8 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((name) => {
-          // Delete all old or mismatched omnipost caches
-          if (name !== CACHE_NAME && name.startsWith('omnipost-')) {
+          // Delete all old or mismatched caches
+          if (name !== CACHE_NAME) {
             console.log('[SW] Deleting obsolete cache:', name);
             return caches.delete(name);
           }
@@ -50,14 +51,20 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // NEVER cache any /api route, /media/ uploads, or non-GET requests
   const url = new URL(event.request.url);
+
+  // Never intercept non-http requests
+  if (!url.protocol.startsWith('http')) return;
+
+  // NEVER cache any /api route, /media/ uploads, /storage/ routes, or non-GET requests
   if (
     event.request.method !== 'GET' ||
-    url.pathname.startsWith('/api') ||
-    url.pathname.includes('/api/') ||
+    url.pathname === '/api' ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.includes('/api') ||
     url.pathname.startsWith('/media') ||
-    url.pathname.includes('/media/')
+    url.pathname.startsWith('/storage') ||
+    url.pathname.startsWith('/health')
   ) {
     // Pass directly to network without service worker caching
     return;
@@ -132,7 +139,7 @@ self.addEventListener('fetch', (event) => {
       return fetch(event.request)
         .then((networkResponse) => {
           // Cache successful responses for next time
-          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          if (networkResponse && networkResponse.status === 200) {
             const copy = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, copy);

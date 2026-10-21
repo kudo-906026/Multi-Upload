@@ -44,6 +44,13 @@ export const App: React.FC = () => {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
   const [aiQuota, setAiQuota] = useState<AIUsageQuota | null>(null);
+  const [isResetPasswordMode, setIsResetPasswordMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.location.search.includes('reset_password=true') ||
+      window.location.hash.includes('type=recovery')
+    );
+  });
 
   // App navigation & data state
   const [activeTab, setActiveTab] = useState<TabId>('create');
@@ -88,11 +95,17 @@ export const App: React.FC = () => {
         return;
       }
 
-      const user = await getCurrentUser();
-      if (user && user.email) {
-        setCurrentUser({ id: user.id, email: user.email });
+      // Restore session from localStorage (persistSession)
+      const { data: sessionData } = await client.auth.getSession();
+      if (sessionData?.session?.user && sessionData.session.user.email) {
+        setCurrentUser({ id: sessionData.session.user.id, email: sessionData.session.user.email });
       } else {
-        setCurrentUser(null);
+        const user = await getCurrentUser();
+        if (user && user.email) {
+          setCurrentUser({ id: user.id, email: user.email });
+        } else {
+          setCurrentUser(null);
+        }
       }
     } catch (err: any) {
       console.error('[AppInit Error]:', err);
@@ -121,21 +134,37 @@ export const App: React.FC = () => {
           return;
         }
 
-        const user = await getCurrentUser();
+        // 1. Restore persisted session from localStorage
+        const { data: sessionData } = await client.auth.getSession();
         if (!isMounted) return;
 
-        if (user && user.email) {
-          setCurrentUser({ id: user.id, email: user.email });
+        if (sessionData?.session?.user && sessionData.session.user.email) {
+          setCurrentUser({
+            id: sessionData.session.user.id,
+            email: sessionData.session.user.email,
+          });
         } else {
-          setCurrentUser(null);
+          const user = await getCurrentUser();
+          if (!isMounted) return;
+          if (user && user.email) {
+            setCurrentUser({ id: user.id, email: user.email });
+          } else {
+            setCurrentUser(null);
+          }
         }
 
-        // Listen to Supabase auth state changes
-        const { data } = client.auth.onAuthStateChange((_event, session) => {
+        // 2. Listen to Supabase auth state changes
+        const { data } = client.auth.onAuthStateChange((event, session) => {
           if (!isMounted) return;
+          console.log('[SupabaseAuth] onAuthStateChange event:', event, 'hasSession:', Boolean(session));
+
+          if (event === 'PASSWORD_RECOVERY') {
+            setIsResetPasswordMode(true);
+          }
+
           if (session?.user && session.user.email) {
             setCurrentUser({ id: session.user.id, email: session.user.email });
-          } else {
+          } else if (event === 'SIGNED_OUT') {
             setCurrentUser(null);
             setPresets([]);
             setJobs([]);
@@ -434,14 +463,22 @@ export const App: React.FC = () => {
     );
   }
 
-  // If user is not authenticated, show modern AuthScreen
-  if (!currentUser) {
+  // If user is not authenticated or in password reset recovery mode, show modern AuthScreen
+  if (!currentUser || isResetPasswordMode) {
     return (
-      <AuthScreen
-        onAuthSuccess={(user) => {
-          setCurrentUser({ id: user.id, email: user.email });
-        }}
-      />
+      <>
+        <UpdateNotification />
+        <AuthScreen
+          isPasswordReset={isResetPasswordMode}
+          onPasswordResetDone={() => {
+            setIsResetPasswordMode(false);
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }}
+          onAuthSuccess={(user) => {
+            setCurrentUser({ id: user.id, email: user.email });
+          }}
+        />
+      </>
     );
   }
 

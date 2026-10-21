@@ -27,7 +27,7 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || '',
 
   // YouTube Data API v3 Key
-  youtubeApiKey: process.env.YOUTUBE_API_KEY || process.env.GEMINI_API_KEY || '',
+  youtubeApiKey: process.env.YOUTUBE_API_KEY || '',
 
   // Google / YouTube Developer App Credentials
   google: {

@@ -34,9 +34,28 @@ export class YouTubeService {
       channelTitle: defaultAcc ? defaultAcc.name : undefined,
       needsReauth: !authenticated && configured,
       hasAnalyticsScope,
-      missingPermissions,
       accounts,
     };
+  }
+
+  /**
+   * Returns authenticated OAuth2Client for a user if connected.
+   */
+  static async getAuthenticatedClient(userId: string, accountId?: string) {
+    const creds = accountId
+      ? AccountStorageService.getAccountTokens<YouTubeTokens>(userId, accountId)
+      : AccountStorageService.getDefaultAccountTokens<YouTubeTokens>(userId, 'youtube');
+    if (!creds || !creds.tokens) return null;
+    const oauth2Client = new google.auth.OAuth2(
+      config.google.clientId,
+      config.google.clientSecret,
+      config.google.redirectUri
+    );
+    oauth2Client.setCredentials({
+      refresh_token: creds.tokens.refreshToken,
+      access_token: creds.tokens.accessToken,
+    });
+    return oauth2Client;
   }
 
   /**

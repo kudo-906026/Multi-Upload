@@ -1,7 +1,6 @@
 import { google } from 'googleapis';
 import { config } from '../config.js';
 import { LiveKeywordData } from '../../shared/types.js';
-import { YouTubeService } from './youtubeService.js';
 
 export class YouTubeKeywordService {
   private static cache = new Map<string, { data: LiveKeywordData; timestamp: number }>();
@@ -10,9 +9,10 @@ export class YouTubeKeywordService {
   /**
    * Queries YouTube Data API v3 (search.list and videos.list) for the confirmed topic,
    * extracts top video tags and titles as live keyword data, and caches for 30 minutes.
-   * Skips quietly if the API key, credentials, or quota are missing.
+   * Public keyword lookups use the server's YOUTUBE_API_KEY directly.
+   * Skips quietly if the API key or quota are missing.
    */
-  static async getLiveKeywordData(topic: string, userId?: string): Promise<LiveKeywordData | null> {
+  static async getLiveKeywordData(topic: string, _userId?: string): Promise<LiveKeywordData | null> {
     const cleanTopic = (topic || '').trim();
     if (!cleanTopic || cleanTopic.length < 2) return null;
 
@@ -25,29 +25,18 @@ export class YouTubeKeywordService {
 
     try {
       const apiKey = config.youtubeApiKey;
-      let authClient: any = null;
-
-      if (!apiKey && userId) {
-        try {
-          authClient = await YouTubeService.getAuthenticatedClient(userId);
-        } catch {
-          authClient = null;
-        }
-      }
-
-      if (!apiKey && !authClient) {
-        // Skip quietly if key or quota is missing
+      if (!apiKey) {
+        // Skip quietly if YOUTUBE_API_KEY is not configured
         return null;
       }
 
       const youtube = google.youtube({
         version: 'v3',
-        auth: authClient || undefined,
       });
 
       // 1. search.list for top videos for the confirmed topic
       const searchRes = await youtube.search.list({
-        key: authClient ? undefined : apiKey,
+        key: apiKey,
         part: ['snippet'],
         q: `${cleanTopic} #shorts`,
         type: ['video'],
@@ -65,7 +54,7 @@ export class YouTubeKeywordService {
 
       // 2. videos.list for detailed tags and statistics
       const detailRes = await youtube.videos.list({
-        key: authClient ? undefined : apiKey,
+        key: apiKey,
         part: ['snippet', 'statistics'],
         id: videoIds,
       });
