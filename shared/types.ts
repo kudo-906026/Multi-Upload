@@ -105,6 +105,24 @@ export interface ConversionProgress {
   convertedUrl?: string;
 }
 
+export type VideoClassificationType =
+  | 'fan_edit'
+  | 'official_clip'
+  | 'trailer'
+  | 'full_scene'
+  | 'reaction'
+  | 'recap_or_explainer'
+  | 'compilation'
+  | 'other';
+
+export interface VideoEditClassification {
+  type: VideoClassificationType;
+  confidence: number; // 0 to 1
+  reason: string;
+  verifiedWithVideo?: boolean;
+  classifiedAt?: string;
+}
+
 export interface TrendingShortVideo {
   id: string;
   title: string;
@@ -121,6 +139,7 @@ export interface TrendingShortVideo {
   durationSec?: number;
   isEmbeddable?: boolean;
   rawViewCount?: number;
+  classification?: VideoEditClassification;
 }
 
 export interface RankedKeyword {
@@ -193,6 +212,12 @@ export interface NicheTrendReport {
   lastUpdated: string;
   cachedUntil: string;
   dataSource?: 'youtube_api' | 'none';
+  classifierStatus?: {
+    available: boolean;
+    notice?: string;
+    model?: string;
+    totalEditsFound?: number;
+  };
   videos: TrendingShortVideo[];
   keywords: RankedKeyword[];
   hashtags: RankedHashtag[];

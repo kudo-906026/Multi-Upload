@@ -19,6 +19,7 @@ import {
   ScheduledPost,
   AnalyticsOverview,
   ContentPlannerReport,
+  VideoEditClassification,
 } from '@shared/types';
 import { getAccessToken } from './supabase';
 
@@ -307,6 +308,21 @@ export class ApiClient {
     const res = await safeFetch<NicheTrendReport>(`${BASE_URL}/trends?${query.toString()}`);
     if (!res.data) throw new Error(res.error || 'Failed to fetch trends');
     return res.data;
+  }
+
+  static async verifyTrendVideo(videoId: string, videoUrl?: string): Promise<VideoEditClassification> {
+    const res = await safeFetch<{ videoId: string; classification: VideoEditClassification }>(
+      `${BASE_URL}/trends/verify-video`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId, videoUrl }),
+      }
+    );
+    if (!res.data?.classification) {
+      throw new Error(res.error || 'Failed to verify video with Gemini');
+    }
+    return res.data.classification;
   }
 
   static async analyzeVideo(params: {

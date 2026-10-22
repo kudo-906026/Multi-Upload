@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { google } from 'googleapis';
 import { config } from '../config.js';
+import { VideoClassifierService } from './videoClassifierService.js';
 import {
   NicheTrendReport,
   TrendingShortVideo,
@@ -241,7 +242,50 @@ export class TrendService {
       return emptyReport;
     }
 
-    const videos = result.videos;
+    let videos = result.videos;
+
+    // 1. Send candidate video metadata to Gemini in ONE batched request (no video watching)
+    const classificationResult = await VideoClassifierService.batchClassifyVideos(videos);
+    videos = classificationResult.classifiedVideos;
+
+    let fanEdits = videos.filter(
+      (v) => v.classification?.type === 'fan_edit' && (v.classification.confidence ?? 0) >= 0.6
+    );
+
+    // 2. If too few fan edits remain (< 6 edits) and classifier is available,
+    // search again with more edit keywords instead of loosening the filter!
+    if (classificationResult.available && fanEdits.length < 6) {
+      console.log(
+        `[TrendService] Only ${fanEdits.length} fan edits found with confidence >= 0.6. Searching again with targeted edit keywords...`
+      );
+      try {
+        const existingIds = new Set<string>(videos.map((v) => v.id));
+        const extraVideos = await this.fetchAdditionalEditCandidates(
+          cleanNiche,
+          cleanRegion,
+          cleanTimeRange,
+          cleanSort,
+          existingIds
+        );
+        if (extraVideos.length > 0) {
+          const extraClassification = await VideoClassifierService.batchClassifyVideos(extraVideos);
+          videos = [...videos, ...extraClassification.classifiedVideos];
+
+          // Re-sort videos
+          if (cleanSort === 'newest') {
+            videos.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+          } else {
+            videos.sort((a, b) => (b.rawViewCount || 0) - (a.rawViewCount || 0));
+          }
+
+          fanEdits = videos.filter(
+            (v) => v.classification?.type === 'fan_edit' && (v.classification.confidence ?? 0) >= 0.6
+          );
+        }
+      } catch (retryErr) {
+        console.warn('[TrendService] Secondary search for additional edits failed:', retryErr);
+      }
+    }
 
     // Compute real keyword and hashtag metrics from the real top videos
     const keywords = this.computeKeywordsFromVideos(videos, cleanNiche);
@@ -290,6 +334,12 @@ export class TrendService {
       lastUpdated: now.toISOString(),
       cachedUntil,
       dataSource: 'youtube_api',
+      classifierStatus: {
+        available: classificationResult.available,
+        notice: classificationResult.notice,
+        model: classificationResult.model,
+        totalEditsFound: fanEdits.length,
+      },
       videos,
       keywords,
       hashtags,
@@ -580,6 +630,174 @@ export class TrendService {
         emptyReason: 'request_failed',
         errorMessage: apiErr?.message || 'Failed to communicate with YouTube Data API v3.',
       };
+    }
+  }
+
+  /**
+   * Performs an additional targeted search with edit keywords when too few fan edits remain.
+   * Never loosens the confidence filter; searches again with more edit keywords.
+   */
+  private static async fetchAdditionalEditCandidates(
+    cleanNiche: string,
+    region: string,
+    timeRange: '24h' | '7d' | '30d',
+    sort: 'newest' | 'most_viewed',
+    existingIds: Set<string>
+  ): Promise<TrendingShortVideo[]> {
+    const apiKey = config.youtubeApiKey;
+    if (!apiKey) return [];
+
+    let queries: string[] = [];
+    if (cleanNiche.includes('anime') || cleanNiche.includes('amv')) {
+      queries = [
+        'anime velocity edit #shorts',
+        'anime 4k phonk edit #shorts',
+        'anime alight motion edit #shorts',
+      ];
+    } else if (cleanNiche.includes('marvel') || cleanNiche.includes('mcu')) {
+      queries = [
+        'marvel velocity edit #shorts',
+        'mcu 4k edit #shorts',
+        'avengers phonk edit #shorts',
+      ];
+    } else if (cleanNiche.includes('manhwa') || cleanNiche.includes('webtoon')) {
+      queries = [
+        'manhwa velocity edit #shorts',
+        'solo leveling 4k edit #shorts',
+        'webtoon phonk edit #shorts',
+      ];
+    } else {
+      queries = [
+        `${cleanNiche} velocity edit #shorts`,
+        `${cleanNiche} 4k edit #shorts`,
+        `${cleanNiche} phonk edit #shorts`,
+      ];
+    }
+
+    const nowMs = Date.now();
+    let cutoffMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+    if (timeRange === '24h') cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+    else if (timeRange === '30d') cutoffMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+    const publishedAfterIso = new Date(cutoffMs).toISOString();
+
+    const youtube = google.youtube({ version: 'v3' });
+    const regionCode = region === 'GLOBAL' ? 'US' : region;
+    const newVideoIds: string[] = [];
+
+    for (const q of queries) {
+      try {
+        const sRes = await youtube.search.list({
+          key: apiKey,
+          part: ['snippet'],
+          q,
+          type: ['video'],
+          videoEmbeddable: 'true',
+          videoSyndicated: 'true',
+          videoDuration: 'short',
+          publishedAfter: publishedAfterIso,
+          order: sort === 'newest' ? 'date' : 'viewCount',
+          regionCode,
+          maxResults: 15,
+        });
+        const items = sRes.data.items || [];
+        for (const it of items) {
+          const vid = it.id?.videoId;
+          if (vid && !existingIds.has(vid) && !newVideoIds.includes(vid)) {
+            newVideoIds.push(vid);
+          }
+        }
+      } catch (err) {
+        console.warn(`[TrendService] Query "${q}" search failed:`, err);
+      }
+    }
+
+    if (newVideoIds.length === 0) return [];
+
+    try {
+      const detailRes = await youtube.videos.list({
+        key: apiKey,
+        part: ['status', 'snippet', 'statistics', 'contentDetails'],
+        id: newVideoIds.slice(0, 30),
+      });
+
+      const extraCollected: TrendingShortVideo[] = [];
+      const items = detailRes.data.items || [];
+
+      for (const v of items) {
+        if (!v.id || existingIds.has(v.id)) continue;
+        if (v.status?.embeddable !== true || v.status?.privacyStatus !== 'public') continue;
+
+        // Restriction check
+        const restr = v.contentDetails?.regionRestriction;
+        if (restr) {
+          if (restr.blocked && restr.blocked.includes(regionCode)) continue;
+          if (restr.allowed && !restr.allowed.includes(regionCode)) continue;
+        }
+
+        // Age rating check
+        const rating = v.contentDetails?.contentRating;
+        if (
+          rating &&
+          (rating.ytRating === 'ytAgeRestricted' ||
+            rating.mpaaRating === 'mpaaNc17' ||
+            rating.mpaaRating === 'mpaaR')
+        ) {
+          continue;
+        }
+
+        // Cutoff check
+        const publishedTime = v.snippet?.publishedAt ? new Date(v.snippet.publishedAt).getTime() : 0;
+        if (publishedTime < cutoffMs) continue;
+
+        // Duration check
+        const dur = v.contentDetails?.duration || '';
+        const match = dur.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        const hours = parseInt(match?.[1] || '0', 10);
+        const minutes = parseInt(match?.[2] || '0', 10);
+        const seconds = parseInt(match?.[3] || '0', 10);
+        const totalSec = hours * 3600 + minutes * 60 + seconds;
+        if (totalSec > 180) continue;
+
+        const title = (v.snippet?.title || '').trim();
+        const channelTitle = (v.snippet?.channelTitle || 'YouTube Creator').trim();
+        const tags = v.snippet?.tags || [];
+        const description = (v.snippet?.description || '').trim();
+
+        if (!this.matchesNicheCriteria(cleanNiche, title, tags, description)) continue;
+
+        const thumbUrl =
+          v.snippet?.thumbnails?.maxres?.url ||
+          v.snippet?.thumbnails?.high?.url ||
+          v.snippet?.thumbnails?.medium?.url ||
+          v.snippet?.thumbnails?.default?.url ||
+          `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`;
+
+        const rawViews = parseInt(v.statistics?.viewCount || '0', 10);
+
+        existingIds.add(v.id);
+        extraCollected.push({
+          id: v.id,
+          title,
+          channelTitle,
+          channelId: v.snippet?.channelId || undefined,
+          viewCount: this.formatViewCount(rawViews),
+          rawViewCount: rawViews,
+          publishedAt: v.snippet?.publishedAt || new Date().toISOString(),
+          age: this.formatTimeAgo(v.snippet?.publishedAt || undefined),
+          thumbnailUrl: thumbUrl,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${v.id}?rel=0&modestbranding=1&playsinline=1`,
+          videoUrl: `https://www.youtube.com/shorts/${v.id}`,
+          tags,
+          description,
+          durationSec: totalSec,
+          isEmbeddable: true,
+        });
+      }
+
+      return extraCollected;
+    } catch (err) {
+      console.warn('[TrendService] Failed to fetch details for extra edit candidates:', err);
+      return [];
     }
   }
 

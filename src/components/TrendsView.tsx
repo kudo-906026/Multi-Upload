@@ -21,6 +21,11 @@ import {
   ArrowUpDown,
   ShieldAlert,
   Music,
+  Scissors,
+  Film,
+  Eye,
+  Layers,
+  Filter,
 } from 'lucide-react';
 import {
   NicheTrendReport,
@@ -28,6 +33,8 @@ import {
   RankedKeyword,
   RankedHashtag,
   TitleIdea,
+  VideoClassificationType,
+  VideoEditClassification,
 } from '@shared/types';
 import { ApiClient } from '../api';
 
@@ -80,16 +87,76 @@ const INSTAGRAM_HOOK_FORMULAS = [
 ];
 
 /**
+ * Helper to get label, color styling and icon for each detected video type
+ */
+function getClassificationInfo(classification?: VideoEditClassification) {
+  if (!classification) return null;
+  const type = classification.type;
+  switch (type) {
+    case 'fan_edit':
+      return {
+        label: 'Fan Edit',
+        badgeClass: 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50 shadow-sm shadow-emerald-950/50',
+        icon: Scissors,
+      };
+    case 'official_clip':
+      return {
+        label: 'Official Clip',
+        badgeClass: 'bg-amber-950/90 text-amber-300 border-amber-500/50',
+        icon: Film,
+      };
+    case 'trailer':
+      return {
+        label: 'Trailer',
+        badgeClass: 'bg-amber-950/90 text-amber-300 border-amber-500/50',
+        icon: Film,
+      };
+    case 'full_scene':
+      return {
+        label: 'Full Scene',
+        badgeClass: 'bg-amber-950/90 text-amber-300 border-amber-500/50',
+        icon: Film,
+      };
+    case 'reaction':
+      return {
+        label: 'Reaction',
+        badgeClass: 'bg-purple-950/90 text-purple-300 border-purple-500/50',
+        icon: Eye,
+      };
+    case 'recap_or_explainer':
+      return {
+        label: 'Recap / Explainer',
+        badgeClass: 'bg-sky-950/90 text-sky-300 border-sky-500/50',
+        icon: Layers,
+      };
+    case 'compilation':
+      return {
+        label: 'Compilation',
+        badgeClass: 'bg-indigo-950/90 text-indigo-300 border-indigo-500/50',
+        icon: Layers,
+      };
+    default:
+      return {
+        label: 'Other',
+        badgeClass: 'bg-slate-900/90 text-slate-300 border-slate-700/60',
+        icon: Sparkles,
+      };
+  }
+}
+
+/**
  * 100% verified real Shorts video card:
  * All metadata (title, channel, thumbnail, views, age, videoId) comes from one real YouTube API item.
  */
 const ShortsVideoCard: React.FC<{
   video: TrendingShortVideo;
   onRemix: (vid: TrendingShortVideo) => void;
-}> = ({ video, onRemix }) => {
+  onVerify?: (vid: TrendingShortVideo) => Promise<void>;
+}> = ({ video, onRemix, onVerify }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackError, setPlaybackError] = useState(false);
   const [isInViewport, setIsInViewport] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -123,6 +190,18 @@ const ShortsVideoCard: React.FC<{
     window.open(video.videoUrl || `https://www.youtube.com/shorts/${video.id}`, '_blank', 'noopener,noreferrer');
   };
 
+  const handleVerifyClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onVerify || isVerifying) return;
+    setIsVerifying(true);
+    try {
+      await onVerify(video);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const classInfo = getClassificationInfo(video.classification);
   const embedSrc = `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
 
   return (
@@ -243,8 +322,34 @@ const ShortsVideoCard: React.FC<{
       </div>
 
       {/* Card Metadata Footer (Guaranteed to match the video) */}
-      <div className="p-3.5 space-y-2 flex-1 flex flex-col justify-between bg-[#141414]">
-        <div className="space-y-1">
+      <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between bg-[#141414]">
+        <div className="space-y-1.5">
+          {/* Classification Badge (if classified) */}
+          {classInfo && (
+            <div className="flex items-center justify-between gap-1.5 flex-wrap">
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1 ${classInfo.badgeClass}`}
+                title={`Detected as ${classInfo.label} (${Math.round((video.classification?.confidence || 0) * 100)}% confidence)`}
+              >
+                <classInfo.icon className="w-2.5 h-2.5 shrink-0" />
+                <span>{classInfo.label}</span>
+                <span className="opacity-80 font-mono text-[9px]">
+                  {Math.round((video.classification?.confidence || 0) * 100)}%
+                </span>
+              </span>
+
+              {video.classification?.verifiedWithVideo ? (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-950/80 text-blue-300 border border-blue-600/50 flex items-center gap-0.5 shadow-sm"
+                  title="Watched and confirmed with Gemini multimodal video model"
+                >
+                  <Check className="w-2.5 h-2.5 text-blue-400" />
+                  <span>AI Watched</span>
+                </span>
+              ) : null}
+            </div>
+          )}
+
           <h4
             onClick={handleOpenDirect}
             className="text-xs font-bold text-white line-clamp-2 group-hover:text-red-400 transition-colors cursor-pointer leading-snug"
@@ -252,22 +357,58 @@ const ShortsVideoCard: React.FC<{
           >
             {video.title}
           </h4>
+
           <p className="text-[11px] text-slate-400 truncate">{video.channelTitle}</p>
+
+          {video.classification?.reason && (
+            <p
+              className="text-[10px] text-slate-400/90 line-clamp-1 italic bg-black/40 px-1.5 py-0.5 rounded border border-white/5"
+              title={video.classification.reason}
+            >
+              &quot;{video.classification.reason}&quot;
+            </p>
+          )}
         </div>
 
-        <div className="pt-2 border-t border-[#272727] flex items-center gap-2">
+        <div className="pt-2 border-t border-[#272727] flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => onRemix(video)}
-            className="flex-1 py-1.5 px-3 rounded-xl text-xs font-bold bg-[#202020] hover:bg-red-600 hover:text-white text-slate-200 transition-all text-center shadow-sm"
+            className="flex-1 py-1.5 px-2 rounded-xl text-xs font-bold bg-[#202020] hover:bg-red-600 hover:text-white text-slate-200 transition-all text-center shadow-sm truncate"
           >
-            Remix in Studio
+            Remix
           </button>
+
+          {/* On-Demand "Verify" Button sending video URL to Gemini */}
+          {onVerify && (
+            <button
+              type="button"
+              onClick={handleVerifyClick}
+              disabled={isVerifying}
+              className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1 shrink-0 ${
+                video.classification?.verifiedWithVideo
+                  ? 'bg-blue-950/40 text-blue-300 border-blue-800/50'
+                  : 'bg-[#202020] hover:bg-indigo-600 hover:text-white text-slate-300 border-[#333]'
+              }`}
+              title="Send video URL to Gemini to watch footage and verify or correct classification (on demand)"
+            >
+              {isVerifying ? (
+                <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
+              ) : video.classification?.verifiedWithVideo ? (
+                <Check className="w-3 h-3 text-blue-400" />
+              ) : (
+                <Eye className="w-3 h-3 text-indigo-400" />
+              )}
+              <span className="text-[10px]">
+                {isVerifying ? 'Watching...' : video.classification?.verifiedWithVideo ? 'Verified' : 'Verify'}
+              </span>
+            </button>
+          )}
 
           <button
             type="button"
             onClick={handleOpenDirect}
-            className="p-1.5 rounded-xl bg-[#202020] hover:bg-[#2a2a2a] text-slate-400 hover:text-white border border-[#333]"
+            className="p-1.5 rounded-xl bg-[#202020] hover:bg-[#2a2a2a] text-slate-400 hover:text-white border border-[#333] shrink-0"
             title="Watch on YouTube"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -285,6 +426,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
   const [selectedRegion, setSelectedRegion] = useState('US');
   const [selectedTimeRange, setSelectedTimeRange] = useState<'24h' | '7d' | '30d'>('7d');
   const [selectedSort, setSelectedSort] = useState<'most_viewed' | 'newest'>('most_viewed');
+  const [editFilter, setEditFilter] = useState<'edits_only' | 'all' | 'official_clips'>('edits_only');
 
   const [activeFinderTab, setActiveFinderTab] = useState<'keywords' | 'hashtags' | 'titles'>('keywords');
   const [report, setReport] = useState<NicheTrendReport | null>(null);
@@ -304,6 +446,30 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
 
   // Feedback state
   const [usedFeedback, setUsedFeedback] = useState<string | null>(null);
+
+  const handleVerifyVideo = async (vid: TrendingShortVideo) => {
+    try {
+      const updated = await ApiClient.verifyTrendVideo(vid.id, vid.videoUrl);
+      setReport((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          videos: prev.videos.map((v) => (v.id === vid.id ? { ...v, classification: updated } : v)),
+        };
+      });
+      const label = getClassificationInfo(updated)?.label || updated.type;
+      setUsedFeedback(
+        `Gemini watched & verified "${vid.title.slice(0, 25)}..." as ${label} (${Math.round(
+          updated.confidence * 100
+        )}%)`
+      );
+      setTimeout(() => setUsedFeedback(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to verify video:', err);
+      setErrorMsg(err.message || 'Video verification failed');
+      throw err;
+    }
+  };
 
   const fetchTrends = async (
     niche: string,
@@ -376,6 +542,41 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
     if (elapsedMinutes === 1) return 'Data from YouTube, updated 1 min ago';
     return `Data from YouTube, updated ${elapsedMinutes} min ago`;
   };
+
+  const isClassifierAvailable = report?.classifierStatus?.available !== false;
+  const allVideos = report?.videos || [];
+
+  const editsCount = allVideos.filter(
+    (v) => v.classification?.type === 'fan_edit' && (v.classification.confidence ?? 0) >= 0.6
+  ).length;
+
+  const officialCount = allVideos.filter(
+    (v) =>
+      v.classification?.type === 'official_clip' ||
+      v.classification?.type === 'trailer' ||
+      v.classification?.type === 'full_scene'
+  ).length;
+
+  const filteredVideos = React.useMemo(() => {
+    // If Gemini is unavailable, show results unfiltered with a clear notice (Requirement 5)
+    if (!isClassifierAvailable || editFilter === 'all') {
+      return allVideos;
+    }
+    if (editFilter === 'edits_only') {
+      return allVideos.filter(
+        (v) => v.classification?.type === 'fan_edit' && (v.classification.confidence ?? 0) >= 0.6
+      );
+    }
+    if (editFilter === 'official_clips') {
+      return allVideos.filter(
+        (v) =>
+          v.classification?.type === 'official_clip' ||
+          v.classification?.type === 'trailer' ||
+          v.classification?.type === 'full_scene'
+      );
+    }
+    return allVideos;
+  }, [allVideos, editFilter, isClassifierAvailable]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-fade-in pb-12">
@@ -780,13 +981,13 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Filtered by {TIME_RANGES.find((t) => t.id === selectedTimeRange)?.label} •{' '}
-                  {SORTS.find((s) => s.id === selectedSort)?.label} • Strictly embeddable & public
+                  {SORTS.find((s) => s.id === selectedSort)?.label} • Embeddable Shorts
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span className="px-2.5 py-1 rounded-lg bg-black border border-[#272727] font-mono text-[11px] text-slate-300">
-                  {report?.videos?.length || 0} Shorts Found
+                  {filteredVideos.length} {editFilter === 'edits_only' ? 'Edits' : editFilter === 'official_clips' ? 'Clips' : 'Shorts'} Shown
                 </span>
                 {report && (
                   <span className="text-[11px] text-emerald-400 hidden md:inline">
@@ -795,6 +996,93 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                 )}
               </div>
             </div>
+
+            {/* Filter Chip Row: Edits only (Default), All, Official clips */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-slate-400 flex items-center gap-1 mr-1">
+                  <Filter className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Filter:</span>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setEditFilter('edits_only')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all ${
+                    editFilter === 'edits_only'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-950/40'
+                      : 'bg-black/60 text-slate-300 border-[#272727] hover:bg-slate-800'
+                  }`}
+                >
+                  <Scissors className="w-3.5 h-3.5" />
+                  <span>Edits only</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                      editFilter === 'edits_only' ? 'bg-emerald-800 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {editsCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEditFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all ${
+                    editFilter === 'all'
+                      ? 'bg-red-600 text-white border-red-500 shadow-md shadow-red-950/40'
+                      : 'bg-black/60 text-slate-300 border-[#272727] hover:bg-slate-800'
+                  }`}
+                >
+                  <span>All</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                      editFilter === 'all' ? 'bg-red-800 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {allVideos.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEditFilter('official_clips')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all ${
+                    editFilter === 'official_clips'
+                      ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-950/40'
+                      : 'bg-black/60 text-slate-300 border-[#272727] hover:bg-slate-800'
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5" />
+                  <span>Official clips</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                      editFilter === 'official_clips' ? 'bg-amber-800 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {officialCount}
+                  </span>
+                </button>
+              </div>
+
+              {report?.classifierStatus?.model && (
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <Sparkles className="w-3 h-3 text-indigo-400" />
+                  <span>Classified by {report.classifierStatus.model}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Graceful Unfiltered Notice when Gemini is unavailable (Requirement 5) */}
+            {report?.classifierStatus && !report.classifierStatus.available && (
+              <div className="p-3 bg-amber-950/40 border border-amber-700/60 rounded-xl flex items-center gap-2.5 text-xs text-amber-200">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  {report.classifierStatus.notice ||
+                    'AI edit classification is temporarily unavailable. Showing all real YouTube results unfiltered.'}
+                </span>
+              </div>
+            )}
 
             {/* Video Cards Grid with Lazy-Loading Players */}
             {isLoading ? (
@@ -809,7 +1097,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                   </div>
                 ))}
               </div>
-            ) : (report?.videos || []).length === 0 ? (
+            ) : allVideos.length === 0 ? (
               /* Truthful Empty States (Never show fake results!) */
               <div className="py-12 px-4 text-center space-y-4 max-w-lg mx-auto">
                 {report?.isMissingKey || report?.emptyReason === 'missing_key' ? (
@@ -820,7 +1108,8 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                     <div className="space-y-1.5">
                       <h4 className="text-base font-bold text-white">YouTube API Key Required</h4>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        {report.errorMessage || 'YOUTUBE_API_KEY is not configured on the server. Please add your YouTube Data API v3 key in your environment variables, or connect a YouTube channel in Accounts.'}
+                        {report.errorMessage ||
+                          'YOUTUBE_API_KEY is not configured on the server. Please add your YouTube Data API v3 key in your environment variables, or connect a YouTube channel in Accounts.'}
                       </p>
                     </div>
                     <div className="pt-2">
@@ -842,7 +1131,8 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                     <div className="space-y-1.5">
                       <h4 className="text-base font-bold text-white">YouTube API Quota Limit Exceeded</h4>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        {report.errorMessage || 'Daily quota for YouTube Data API v3 has been reached. Quota resets daily at midnight Pacific Time. In accordance with data integrity rules, placeholder data is not displayed.'}
+                        {report.errorMessage ||
+                          'Daily quota for YouTube Data API v3 has been reached. Quota resets daily at midnight Pacific Time. In accordance with data integrity rules, placeholder data is not displayed.'}
                       </p>
                     </div>
                     <button
@@ -881,7 +1171,8 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                     <div className="space-y-1.5">
                       <h4 className="text-base font-bold text-white">No Matching Shorts Found</h4>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        No embeddable YouTube Shorts matching the niche &quot;{selectedNiche}&quot; were found in the last {TIME_RANGES.find((t) => t.id === selectedTimeRange)?.label.toLowerCase()}.
+                        No embeddable YouTube Shorts matching the niche &quot;{selectedNiche}&quot; were found in the last{' '}
+                        {TIME_RANGES.find((t) => t.id === selectedTimeRange)?.label.toLowerCase()}.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
@@ -908,10 +1199,37 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ onUseTrendInStudio }) =>
                   </>
                 )}
               </div>
+            ) : filteredVideos.length === 0 ? (
+              /* No videos matching the selected filter */
+              <div className="py-12 px-4 text-center space-y-4 max-w-md mx-auto">
+                <div className="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <Filter className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-white">
+                    No videos matching &quot;{editFilter === 'edits_only' ? 'Edits only (>=60% confidence)' : 'Official clips'}&quot;
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    {allVideos.length} candidate videos were fetched from YouTube for this niche.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditFilter('all')}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-md shadow-red-900/30"
+                >
+                  View All {allVideos.length} Videos
+                </button>
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {(report?.videos || []).map((vid) => (
-                  <ShortsVideoCard key={vid.id} video={vid} onRemix={handleUseVideoInStudio} />
+                {filteredVideos.map((vid) => (
+                  <ShortsVideoCard
+                    key={vid.id}
+                    video={vid}
+                    onRemix={handleUseVideoInStudio}
+                    onVerify={handleVerifyVideo}
+                  />
                 ))}
               </div>
             )}

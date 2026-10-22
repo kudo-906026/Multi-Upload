@@ -12,6 +12,7 @@ import { JobQueueService } from '../services/jobQueue.js';
 import { AccountStorageService } from '../services/accountStorage.js';
 import { FFmpegService } from '../services/ffmpegService.js';
 import { TrendService } from '../services/trendService.js';
+import { VideoClassifierService } from '../services/videoClassifierService.js';
 import { OAuthStateService } from '../services/oauthStateService.js';
 import { AIUsageService } from '../services/aiUsageService.js';
 import { SchedulingService } from '../services/schedulingService.js';
@@ -685,6 +686,39 @@ router.get('/trends', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[TrendsRoute] Error fetching trends:', err);
     res.status(500).json({ success: false, error: err.message || 'Failed to fetch trending topics' });
+  }
+});
+
+// --- On-Demand YouTube Video Verification with Gemini Multimodal ---
+router.post('/trends/verify-video', async (req: Request, res: Response) => {
+  try {
+    const { videoId, videoUrl } = req.body;
+    if (!videoId) {
+      return res.status(400).json({ success: false, error: 'videoId is required' });
+    }
+
+    const verification = await VideoClassifierService.verifyVideoWithGemini(
+      String(videoId),
+      videoUrl ? String(videoUrl) : `https://www.youtube.com/watch?v=${videoId}`
+    );
+
+    if (!verification.success || !verification.classification) {
+      return res.status(500).json({
+        success: false,
+        error: verification.error || 'Failed to verify video with Gemini',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        videoId,
+        classification: verification.classification,
+      },
+    });
+  } catch (err: any) {
+    console.error('[VerifyVideoRoute] Error verifying video:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to verify video' });
   }
 });
 
